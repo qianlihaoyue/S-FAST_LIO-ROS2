@@ -41,6 +41,7 @@ double time_diff_lidar_to_imu = 0.0;
 
 mutex mtx_buffer;
 condition_variable sig_buffer;
+ros::Publisher pubLaserCloudMap;
 
 string root_dir = ROOT_DIR;
 string map_file_path, lid_topic, imu_topic;
@@ -50,7 +51,7 @@ double gyr_cov = 0.1, acc_cov = 0.1, b_gyr_cov = 0.0001, b_acc_cov = 0.0001;
 double filter_size_corner_min = 0, filter_size_surf_min = 0, filter_size_map_min = 0, fov_deg = 0;
 double cube_len = 0, lidar_end_time = 0, first_lidar_time = 0.0;
 int scan_count = 0, publish_count = 0;
-int feats_down_size = 0, NUM_MAX_ITERATIONS = 0, pcd_save_interval = -1, pcd_index = 0;
+int feats_down_size = 0, NUM_MAX_ITERATIONS = 0, pcd_index = 0;
 
 bool lidar_pushed, flg_first_scan = true, flg_exit = false, flg_EKF_inited;
 bool scan_pub_en = false, dense_pub_en = false, scan_body_pub_en = false;
@@ -59,6 +60,8 @@ vector<BoxPointType> cub_needrm;
 vector<PointVector> Nearest_Points;
 vector<double> extrinT(3, 0.0);
 vector<double> extrinR(9, 0.0);
+vector<double> init_pos(3, 0.0);
+vector<double> init_rot{0, 0, 0, 1};
 deque<double> time_buffer;
 deque<PointCloudXYZI::Ptr> lidar_buffer;
 deque<sensor_msgs::Imu::ConstPtr> imu_buffer;
@@ -67,6 +70,7 @@ PointCloudXYZI::Ptr featsFromMap(new PointCloudXYZI());
 PointCloudXYZI::Ptr feats_undistort(new PointCloudXYZI());
 PointCloudXYZI::Ptr feats_down_body(new PointCloudXYZI());  //畸变纠正后降采样的单帧点云，lidar系
 PointCloudXYZI::Ptr feats_down_world(new PointCloudXYZI()); //畸变纠正后降采样的单帧点云，W系
+PointCloudXYZI::Ptr cloud(new PointCloudXYZI());
 
 pcl::VoxelGrid<PointType> downSizeFilterSurf;
 pcl::VoxelGrid<PointType> downSizeFilterMap;
@@ -341,55 +345,18 @@ void RGBpointBodyLidarToIMU(PointType const *const pi, PointType *const po)
 }
 
 //根据最新估计位姿  增量添加点云到map
-void map_incremental()
+void init_ikdtree()
 {
-    PointVector PointToAdd;
-    PointVector PointNoNeedDownsample;
-    PointToAdd.reserve(feats_down_size);
-    PointNoNeedDownsample.reserve(feats_down_size);
-    for (int i = 0; i < feats_down_size; i++)
+    //加载读取点云数据到cloud中
+    string all_points_dir(string(string(ROOT_DIR) + "PCD/") + "GlobalMap_ikdtree.pcd");
+    if (pcl::io::loadPCDFile<PointType>(all_points_dir, *cloud) == -1)
     {
-        //转换到世界坐标系
-        pointBodyToWorld(&(feats_down_body->points[i]), &(feats_down_world->points[i]));
-
-        if (!Nearest_Points[i].empty() && flg_EKF_inited)
-        {
-            const PointVector &points_near = Nearest_Points[i];
-            bool need_add = true;
-            BoxPointType Box_of_Point;
-            PointType mid_point; //点所在体素的中心
-            mid_point.x = floor(feats_down_world->points[i].x / filter_size_map_min) * filter_size_map_min + 0.5 * filter_size_map_min;
-            mid_point.y = floor(feats_down_world->points[i].y / filter_size_map_min) * filter_size_map_min + 0.5 * filter_size_map_min;
-            mid_point.z = floor(feats_down_world->points[i].z / filter_size_map_min) * filter_size_map_min + 0.5 * filter_size_map_min;
-            float dist = calc_dist(feats_down_world->points[i], mid_point);
-            if (fabs(points_near[0].x - mid_point.x) > 0.5 * filter_size_map_min && fabs(points_near[0].y - mid_point.y) > 0.5 * filter_size_map_min && fabs(points_near[0].z - mid_point.z) > 0.5 * filter_size_map_min)
-            {
-                PointNoNeedDownsample.push_back(feats_down_world->points[i]); //如果距离最近的点都在体素外，则该点不需要Downsample
-                continue;
-            }
-            for (int j = 0; j < NUM_MATCH_POINTS; j++)
-            {
-                if (points_near.size() < NUM_MATCH_POINTS)
-                    break;
-                if (calc_dist(points_near[j], mid_point) < dist) //如果近邻点距离 < 当前点距离，不添加该点
-                {
-                    need_add = false;
-                    break;
-                }
-            }
-            if (need_add)
-                PointToAdd.push_back(feats_down_world->points[i]);
-        }
-        else
-        {
-            PointToAdd.push_back(feats_down_world->points[i]);
-        }
+        PCL_ERROR("Read file fail!\n");
     }
 
-    double st_time = omp_get_wtime();
-    add_point_size = ikdtree.Add_Points(PointToAdd, true);
-    ikdtree.Add_Points(PointNoNeedDownsample, false);
-    add_point_size = PointToAdd.size() + PointNoNeedDownsample.size();
+    ikdtree.set_downsample_param(filter_size_map_min);
+    ikdtree.Build(cloud->points);
+    std::cout << "---- ikdtree size: " << ikdtree.size() << std::endl;
 }
 
 PointCloudXYZI::Ptr pcl_wait_pub(new PointCloudXYZI(500000, 1));
@@ -437,17 +404,6 @@ void publish_frame_world(const ros::Publisher &pubLaserCloudFull_)
 
         if (scan_wait_num % 4 == 0)
             *pcl_wait_save += *laserCloudWorld;
-
-        if (pcl_wait_save->size() > 0 && pcd_save_interval > 0 && scan_wait_num >= pcd_save_interval)
-        {
-            pcd_index++;
-            string all_points_dir(string(string(ROOT_DIR) + "PCD/scans_") + to_string(pcd_index) + string(".pcd"));
-            pcl::PCDWriter pcd_writer;
-            cout << "current scan saved to /PCD/" << all_points_dir << endl;
-            pcd_writer.writeBinary(all_points_dir, *pcl_wait_save);
-            pcl_wait_save->clear();
-            scan_wait_num = 0;
-        }
     }
 }
 
@@ -577,9 +533,11 @@ int main(int argc, char **argv)
     nh.param<bool>("feature_extract_enable", p_pre->feature_enabled, false); // 是否提取特征点（FAST_LIO2默认不进行特征点提取）
     nh.param<bool>("mapping/extrinsic_est_en", extrinsic_est_en, true);
     nh.param<bool>("pcd_save/pcd_save_en", pcd_save_en, false); // 是否将点云地图保存到PCD文件
-    nh.param<int>("pcd_save/interval", pcd_save_interval, -1);
     nh.param<vector<double>>("mapping/extrinsic_T", extrinT, vector<double>()); // 雷达相对于IMU的外参T（即雷达在IMU坐标系中的坐标）
     nh.param<vector<double>>("mapping/extrinsic_R", extrinR, vector<double>()); // 雷达相对于IMU的外参R
+
+    nh.param<vector<double>>("mapping/init_pos", init_pos, vector<double>()); // 雷达相对于IMU的外参T（即雷达在IMU坐标系中的坐标）
+    nh.param<vector<double>>("mapping/init_rot", init_rot, vector<double>()); // 雷达相对于IMU的外参R
 
     cout << "Lidar_type: " << p_pre->lidar_type << endl;
     // 初始化path的header（包括时间戳和帧id），path用于保存odemetry的路径
@@ -592,7 +550,7 @@ int main(int argc, char **argv)
     ros::Publisher pubLaserCloudFull = nh.advertise<sensor_msgs::PointCloud2>("/cloud_registered", 100000);
     ros::Publisher pubLaserCloudFull_body = nh.advertise<sensor_msgs::PointCloud2>("/cloud_registered_body", 100000);
     ros::Publisher pubLaserCloudEffect = nh.advertise<sensor_msgs::PointCloud2>("/cloud_effected", 100000);
-    ros::Publisher pubLaserCloudMap = nh.advertise<sensor_msgs::PointCloud2>("/Laser_map", 100000);
+    pubLaserCloudMap = nh.advertise<sensor_msgs::PointCloud2>("/Laser_map", 100000);
     ros::Publisher pubOdomAftMapped = nh.advertise<nav_msgs::Odometry>("/Odometry", 100000);
     ros::Publisher pubPath = nh.advertise<nav_msgs::Path>("/path", 100000);
 
@@ -608,6 +566,15 @@ int main(int argc, char **argv)
     signal(SIGINT, SigHandle);
     ros::Rate rate(5000);
 
+    init_ikdtree(); //读取点云文件 初始化ikdtree
+
+    state_point = kf.get_x();
+    state_point.pos = Eigen::Vector3d(init_pos[0], init_pos[1], init_pos[2]);
+    Eigen::Quaterniond q(init_rot[3], init_rot[0], init_rot[1], init_rot[2]);
+    Sophus::SO3 SO3_q(q);
+    state_point.rot = SO3_q;
+    kf.change_x(state_point);
+
     while (ros::ok())
     {
         if (flg_exit)
@@ -622,6 +589,19 @@ int main(int argc, char **argv)
             {
                 first_lidar_time = Measures.lidar_beg_time;
                 p_imu1->first_lidar_time = first_lidar_time;
+
+                string all_points_dir(string(string(ROOT_DIR) + "PCD/") + "GlobalMap.pcd");
+                if (pcl::io::loadPCDFile<PointType>(all_points_dir, *cloud) == -1)
+                {
+                    PCL_ERROR("Read file fail!\n");
+                }
+
+                sensor_msgs::PointCloud2 laserCloudMap;
+                pcl::toROSMsg(*cloud, laserCloudMap);
+                laserCloudMap.header.stamp = ros::Time().fromSec(lidar_end_time);
+                laserCloudMap.header.frame_id = "camera_init";
+                pubLaserCloudMap.publish(laserCloudMap);
+
                 flg_first_scan = false;
                 continue;
             }
@@ -654,26 +634,13 @@ int main(int argc, char **argv)
                 continue;
             }
 
-            //初始化ikdtree(ikdtree为空时)
-            if (ikdtree.Root_Node == nullptr)
-            {
-                ikdtree.set_downsample_param(filter_size_map_min);
-                feats_down_world->resize(feats_down_size);
-                for (int i = 0; i < feats_down_size; i++)
-                {
-                    pointBodyToWorld(&(feats_down_body->points[i]), &(feats_down_world->points[i])); // lidar坐标系转到世界坐标系
-                }
-                ikdtree.Build(feats_down_world->points); //根据世界坐标系下的点构建ikdtree
-                continue;
-            }
-
             if (0) // If you need to see map point, change to "if(1)"
             {
                 PointVector().swap(ikdtree.PCL_Storage);
                 ikdtree.flatten(ikdtree.Root_Node, ikdtree.PCL_Storage, NOT_RECORD);
                 featsFromMap->clear();
                 featsFromMap->points = ikdtree.PCL_Storage;
-                // std::cout << "ikdtree size: " << featsFromMap->points.size() << std::endl;
+                std::cout << "ikdtree size: " << featsFromMap->points.size() << std::endl;
             }
 
             /*** iterated state estimation ***/
@@ -688,7 +655,7 @@ int main(int argc, char **argv)
 
             /*** add the feature points to map kdtree ***/
             feats_down_world->resize(feats_down_size);
-            map_incremental();
+            // map_incremental();
 
             /******* Publish points *******/
             if (path_en)
@@ -697,7 +664,6 @@ int main(int argc, char **argv)
                 publish_frame_world(pubLaserCloudFull);
             if (scan_pub_en && scan_body_pub_en)
                 publish_frame_body(pubLaserCloudFull_body);
-            // publish_map(pubLaserCloudMap);
 
             double t11 = omp_get_wtime();
             std::cout << "feats_down_size: " << feats_down_size << "  Whole mapping time(ms):  " << (t11 - t00) * 1000 << std::endl
@@ -705,40 +671,6 @@ int main(int argc, char **argv)
         }
 
         rate.sleep();
-    }
-
-    /**************** save map ****************/
-    /* 1. make sure you have enough memories
-    /* 2. pcd save will largely influence the real-time performences **/
-    if (pcl_wait_save->size() > 0 && pcd_save_en)
-    {
-        pcl::PointCloud<pcl::PointXYZ>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZ>);
-        for (size_t i = 1; i <= pcd_index; i++)
-        {
-            pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_temp(new pcl::PointCloud<pcl::PointXYZ>);
-            string all_points_dir(string(string(ROOT_DIR) + "PCD/scans_") + to_string(i) + string(".pcd"));
-            pcl::PCDReader reader;
-            reader.read(all_points_dir, *cloud_temp);
-            *cloud = *cloud + *cloud_temp;
-        }
-
-        string file_name = string("GlobalMap.pcd");
-        string all_points_dir(string(string(ROOT_DIR) + "PCD/") + file_name);
-        pcl::PCDWriter pcd_writer;
-        cout << "current scan saved to /PCD/" << file_name << endl;
-        pcd_writer.writeBinary(all_points_dir, *cloud);
-
-        //////////////////////////////////////
-        PointVector().swap(ikdtree.PCL_Storage);
-        ikdtree.flatten(ikdtree.Root_Node, ikdtree.PCL_Storage, NOT_RECORD);
-        featsFromMap->clear();
-        featsFromMap->points = ikdtree.PCL_Storage;
-        std::cout << "ikdtree size: " << featsFromMap->points.size() << std::endl;
-        string file_name1 = string("GlobalMap_ikdtree.pcd");
-        pcl::PCDWriter pcd_writer1;
-        string all_points_dir1(string(string(ROOT_DIR) + "PCD/") + file_name1);
-        cout << "current scan saved to /PCD/" << file_name1 << endl;
-        pcd_writer1.writeBinary(all_points_dir1, *featsFromMap);
     }
 
     return 0;
