@@ -34,7 +34,7 @@ int add_point_size = 0, kdtree_delete_counter = 0;
 bool pcd_save_en = false, time_sync_en = false, extrinsic_est_en = true, path_en = true;
 /**************************/
 
-float res_last[100000] = {0.0};
+float res_last[100000] = { 0.0 };
 float DET_RANGE = 300.0f;
 const float MOV_THRESHOLD = 1.5f;
 double time_diff_lidar_to_imu = 0.0;
@@ -61,7 +61,7 @@ vector<PointVector> Nearest_Points;
 vector<double> extrinT(3, 0.0);
 vector<double> extrinR(9, 0.0);
 vector<double> init_pos(3, 0.0);
-vector<double> init_rot{0, 0, 0, 1};
+vector<double> init_rot{ 0, 0, 0, 1 };
 deque<double> time_buffer;
 deque<PointCloudXYZI::Ptr> lidar_buffer;
 deque<sensor_msgs::Imu::ConstPtr> imu_buffer;
@@ -94,20 +94,17 @@ geometry_msgs::PoseStamped msg_body_pose;
 
 shared_ptr<Preprocess> p_pre(new Preprocess());
 
-void SigHandle(int sig)
-{
+void SigHandle(int sig) {
     flg_exit = true;
     ROS_WARN("catch sig %d", sig);
     sig_buffer.notify_all();
 }
 
-void standard_pcl_cbk(const sensor_msgs::PointCloud2::ConstPtr &msg)
-{
+void standard_pcl_cbk(const sensor_msgs::PointCloud2::ConstPtr& msg) {
     mtx_buffer.lock();
     scan_count++;
     double preprocess_start_time = omp_get_wtime();
-    if (msg->header.stamp.toSec() < last_timestamp_lidar)
-    {
+    if (msg->header.stamp.toSec() < last_timestamp_lidar) {
         ROS_ERROR("lidar loop back, clear buffer");
         lidar_buffer.clear();
     }
@@ -123,25 +120,21 @@ void standard_pcl_cbk(const sensor_msgs::PointCloud2::ConstPtr &msg)
 
 double timediff_lidar_wrt_imu = 0.0;
 bool timediff_set_flg = false;
-void livox_pcl_cbk(const livox_ros_driver::CustomMsg::ConstPtr &msg)
-{
+void livox_pcl_cbk(const livox_ros_driver::CustomMsg::ConstPtr& msg) {
     mtx_buffer.lock();
     double preprocess_start_time = omp_get_wtime();
     scan_count++;
-    if (msg->header.stamp.toSec() < last_timestamp_lidar)
-    {
+    if (msg->header.stamp.toSec() < last_timestamp_lidar) {
         ROS_ERROR("lidar loop back, clear buffer");
         lidar_buffer.clear();
     }
     last_timestamp_lidar = msg->header.stamp.toSec();
 
-    if (!time_sync_en && abs(last_timestamp_imu - last_timestamp_lidar) > 10.0 && !imu_buffer.empty() && !lidar_buffer.empty())
-    {
+    if (!time_sync_en && abs(last_timestamp_imu - last_timestamp_lidar) > 10.0 && !imu_buffer.empty() && !lidar_buffer.empty()) {
         printf("IMU and LiDAR not Synced, IMU time: %lf, lidar header time: %lf \n", last_timestamp_imu, last_timestamp_lidar);
     }
 
-    if (time_sync_en && !timediff_set_flg && abs(last_timestamp_lidar - last_timestamp_imu) > 1 && !imu_buffer.empty())
-    {
+    if (time_sync_en && !timediff_set_flg && abs(last_timestamp_lidar - last_timestamp_imu) > 1 && !imu_buffer.empty()) {
         timediff_set_flg = true;
         timediff_lidar_wrt_imu = last_timestamp_lidar + 0.1 - last_timestamp_imu;
         printf("Self sync IMU and LiDAR, time diff is %.10lf \n", timediff_lidar_wrt_imu);
@@ -156,14 +149,12 @@ void livox_pcl_cbk(const livox_ros_driver::CustomMsg::ConstPtr &msg)
     sig_buffer.notify_all();
 }
 
-void imu_cbk(const sensor_msgs::Imu::ConstPtr &msg_in)
-{
+void imu_cbk(const sensor_msgs::Imu::ConstPtr& msg_in) {
     publish_count++;
     // cout<<"IMU got at: "<<msg_in->header.stamp.toSec()<<endl;
     sensor_msgs::Imu::Ptr msg(new sensor_msgs::Imu(*msg_in));
 
-    if (abs(timediff_lidar_wrt_imu) > 0.1 && time_sync_en)
-    {
+    if (abs(timediff_lidar_wrt_imu) > 0.1 && time_sync_en) {
         msg->header.stamp =
             ros::Time().fromSec(timediff_lidar_wrt_imu + msg_in->header.stamp.toSec());
     }
@@ -174,8 +165,7 @@ void imu_cbk(const sensor_msgs::Imu::ConstPtr &msg_in)
 
     mtx_buffer.lock();
 
-    if (timestamp < last_timestamp_imu)
-    {
+    if (timestamp < last_timestamp_imu) {
         ROS_WARN("imu loop back, clear buffer");
         imu_buffer.clear();
     }
@@ -190,16 +180,13 @@ void imu_cbk(const sensor_msgs::Imu::ConstPtr &msg_in)
 double lidar_mean_scantime = 0.0;
 int scan_num = 0;
 //把当前要处理的LIDAR和IMU数据打包到meas
-bool sync_packages(MeasureGroup &meas)
-{
-    if (lidar_buffer.empty() || imu_buffer.empty())
-    {
+bool sync_packages(MeasureGroup& meas) {
+    if (lidar_buffer.empty() || imu_buffer.empty()) {
         return false;
     }
 
     /*** push a lidar scan ***/
-    if (!lidar_pushed)
-    {
+    if (!lidar_pushed) {
         meas.lidar = lidar_buffer.front();
         meas.lidar_beg_time = time_buffer.front();
         if (meas.lidar->points.size() <= 5) // time too little
@@ -207,12 +194,10 @@ bool sync_packages(MeasureGroup &meas)
             lidar_end_time = meas.lidar_beg_time + lidar_mean_scantime;
             ROS_WARN("Too few input point cloud!\n");
         }
-        else if (meas.lidar->points.back().curvature / double(1000) < 0.5 * lidar_mean_scantime)
-        {
+        else if (meas.lidar->points.back().curvature / double(1000) < 0.5 * lidar_mean_scantime) {
             lidar_end_time = meas.lidar_beg_time + lidar_mean_scantime;
         }
-        else
-        {
+        else {
             scan_num++;
             lidar_end_time = meas.lidar_beg_time + meas.lidar->points.back().curvature / double(1000);
             lidar_mean_scantime += (meas.lidar->points.back().curvature / double(1000) - lidar_mean_scantime) / scan_num;
@@ -223,16 +208,14 @@ bool sync_packages(MeasureGroup &meas)
         lidar_pushed = true;
     }
 
-    if (last_timestamp_imu < lidar_end_time)
-    {
+    if (last_timestamp_imu < lidar_end_time) {
         return false;
     }
 
     /*** push imu data, and pop from imu buffer ***/
     double imu_time = imu_buffer.front()->header.stamp.toSec();
     meas.imu.clear();
-    while ((!imu_buffer.empty()) && (imu_time < lidar_end_time))
-    {
+    while ((!imu_buffer.empty()) && (imu_time < lidar_end_time)) {
         imu_time = imu_buffer.front()->header.stamp.toSec();
         if (imu_time > lidar_end_time)
             break;
@@ -246,8 +229,7 @@ bool sync_packages(MeasureGroup &meas)
     return true;
 }
 
-void pointBodyToWorld(PointType const *const pi, PointType *const po)
-{
+void pointBodyToWorld(PointType const* const pi, PointType* const po) {
     V3D p_body(pi->x, pi->y, pi->z);
     V3D p_global(state_point.rot.matrix() * (state_point.offset_R_L_I.matrix() * p_body + state_point.offset_T_L_I) + state_point.pos);
 
@@ -258,8 +240,7 @@ void pointBodyToWorld(PointType const *const pi, PointType *const po)
 }
 
 template <typename T>
-void pointBodyToWorld(const Matrix<T, 3, 1> &pi, Matrix<T, 3, 1> &po)
-{
+void pointBodyToWorld(const Matrix<T, 3, 1>& pi, Matrix<T, 3, 1>& po) {
     V3D p_body(pi[0], pi[1], pi[2]);
     V3D p_global(state_point.rot.matrix() * (state_point.offset_R_L_I.matrix() * p_body + state_point.offset_T_L_I) + state_point.pos);
 
@@ -270,17 +251,14 @@ void pointBodyToWorld(const Matrix<T, 3, 1> &pi, Matrix<T, 3, 1> &po)
 
 BoxPointType LocalMap_Points;      // ikd-tree地图立方体的2个角点
 bool Localmap_Initialized = false; // 局部地图是否初始化
-void lasermap_fov_segment()
-{
+void lasermap_fov_segment() {
     cub_needrm.clear(); // 清空需要移除的区域
     kdtree_delete_counter = 0;
 
     V3D pos_LiD = pos_lid; // W系下位置
     //初始化局部地图范围，以pos_LiD为中心,长宽高均为cube_len
-    if (!Localmap_Initialized)
-    {
-        for (int i = 0; i < 3; i++)
-        {
+    if (!Localmap_Initialized) {
+        for (int i = 0; i < 3; i++) {
             LocalMap_Points.vertex_min[i] = pos_LiD(i) - cube_len / 2.0;
             LocalMap_Points.vertex_max[i] = pos_LiD(i) + cube_len / 2.0;
         }
@@ -291,8 +269,7 @@ void lasermap_fov_segment()
     //各个方向上pos_LiD与局部地图边界的距离
     float dist_to_map_edge[3][2];
     bool need_move = false;
-    for (int i = 0; i < 3; i++)
-    {
+    for (int i = 0; i < 3; i++) {
         dist_to_map_edge[i][0] = fabs(pos_LiD(i) - LocalMap_Points.vertex_min[i]);
         dist_to_map_edge[i][1] = fabs(pos_LiD(i) - LocalMap_Points.vertex_max[i]);
         // 与某个方向上的边界距离（1.5*300m）太小，标记需要移除need_move(FAST-LIO2论文Fig.3)
@@ -306,18 +283,15 @@ void lasermap_fov_segment()
     New_LocalMap_Points = LocalMap_Points;
     //需要移动的距离
     float mov_dist = max((cube_len - 2.0 * MOV_THRESHOLD * DET_RANGE) * 0.5 * 0.9, double(DET_RANGE * (MOV_THRESHOLD - 1)));
-    for (int i = 0; i < 3; i++)
-    {
+    for (int i = 0; i < 3; i++) {
         tmp_boxpoints = LocalMap_Points;
-        if (dist_to_map_edge[i][0] <= MOV_THRESHOLD * DET_RANGE)
-        {
+        if (dist_to_map_edge[i][0] <= MOV_THRESHOLD * DET_RANGE) {
             New_LocalMap_Points.vertex_max[i] -= mov_dist;
             New_LocalMap_Points.vertex_min[i] -= mov_dist;
             tmp_boxpoints.vertex_min[i] = LocalMap_Points.vertex_max[i] - mov_dist;
             cub_needrm.push_back(tmp_boxpoints);
         }
-        else if (dist_to_map_edge[i][1] <= MOV_THRESHOLD * DET_RANGE)
-        {
+        else if (dist_to_map_edge[i][1] <= MOV_THRESHOLD * DET_RANGE) {
             New_LocalMap_Points.vertex_max[i] += mov_dist;
             New_LocalMap_Points.vertex_min[i] += mov_dist;
             tmp_boxpoints.vertex_max[i] = LocalMap_Points.vertex_min[i] + mov_dist;
@@ -333,8 +307,7 @@ void lasermap_fov_segment()
         kdtree_delete_counter = ikdtree.Delete_Point_Boxes(cub_needrm); //删除指定范围内的点
 }
 
-void RGBpointBodyLidarToIMU(PointType const *const pi, PointType *const po)
-{
+void RGBpointBodyLidarToIMU(PointType const* const pi, PointType* const po) {
     V3D p_body_lidar(pi->x, pi->y, pi->z);
     V3D p_body_imu(state_point.offset_R_L_I.matrix() * p_body_lidar + state_point.offset_T_L_I);
 
@@ -345,12 +318,10 @@ void RGBpointBodyLidarToIMU(PointType const *const pi, PointType *const po)
 }
 
 //根据最新估计位姿  增量添加点云到map
-void init_ikdtree()
-{
+void init_ikdtree() {
     //加载读取点云数据到cloud中
     string all_points_dir(string(string(ROOT_DIR) + "PCD/") + "GlobalMap_ikdtree.pcd");
-    if (pcl::io::loadPCDFile<PointType>(all_points_dir, *cloud) == -1)
-    {
+    if (pcl::io::loadPCDFile<PointType>(all_points_dir, *cloud) == -1) {
         PCL_ERROR("Read file fail!\n");
     }
 
@@ -361,19 +332,15 @@ void init_ikdtree()
 
 PointCloudXYZI::Ptr pcl_wait_pub(new PointCloudXYZI(500000, 1));
 PointCloudXYZI::Ptr pcl_wait_save(new PointCloudXYZI());
-void publish_frame_world(const ros::Publisher &pubLaserCloudFull_)
-{
-    if (scan_pub_en)
-    {
+void publish_frame_world(const ros::Publisher& pubLaserCloudFull_) {
+    if (scan_pub_en) {
         PointCloudXYZI::Ptr laserCloudFullRes(dense_pub_en ? feats_undistort : feats_down_body);
         int size = laserCloudFullRes->points.size();
-        PointCloudXYZI::Ptr laserCloudWorld(
-            new PointCloudXYZI(size, 1));
+        PointCloudXYZI::Ptr laserCloudWorld( new PointCloudXYZI(size, 1));
 
-        for (int i = 0; i < size; i++)
-        {
+        for (int i = 0; i < size; i++) {
             pointBodyToWorld(&laserCloudFullRes->points[i],
-                             &laserCloudWorld->points[i]);
+                &laserCloudWorld->points[i]);
         }
 
         sensor_msgs::PointCloud2 laserCloudmsg;
@@ -387,16 +354,13 @@ void publish_frame_world(const ros::Publisher &pubLaserCloudFull_)
     /**************** save map ****************/
     /* 1. make sure you have enough memories
     /* 2. noted that pcd save will influence the real-time performences **/
-    if (pcd_save_en)
-    {
+    if (pcd_save_en) {
         int size = feats_undistort->points.size();
         PointCloudXYZI::Ptr laserCloudWorld(
             new PointCloudXYZI(size, 1));
 
-        for (int i = 0; i < size; i++)
-        {
-            pointBodyToWorld(&feats_undistort->points[i],
-                             &laserCloudWorld->points[i]);
+        for (int i = 0; i < size; i++) {
+            pointBodyToWorld(&feats_undistort->points[i], &laserCloudWorld->points[i]);
         }
 
         static int scan_wait_num = 0;
@@ -407,15 +371,12 @@ void publish_frame_world(const ros::Publisher &pubLaserCloudFull_)
     }
 }
 
-void publish_frame_body(const ros::Publisher &pubLaserCloudFull_body)
-{
+void publish_frame_body(const ros::Publisher& pubLaserCloudFull_body) {
     int size = feats_undistort->points.size();
     PointCloudXYZI::Ptr laserCloudIMUBody(new PointCloudXYZI(size, 1));
 
-    for (int i = 0; i < size; i++)
-    {
-        RGBpointBodyLidarToIMU(&feats_undistort->points[i],
-                               &laserCloudIMUBody->points[i]);
+    for (int i = 0; i < size; i++) {
+        RGBpointBodyLidarToIMU(&feats_undistort->points[i], &laserCloudIMUBody->points[i]);
     }
 
     sensor_msgs::PointCloud2 laserCloudmsg;
@@ -426,8 +387,7 @@ void publish_frame_body(const ros::Publisher &pubLaserCloudFull_body)
     publish_count -= PUBFRAME_PERIOD;
 }
 
-void publish_map(const ros::Publisher &pubLaserCloudMap)
-{
+void publish_map(const ros::Publisher& pubLaserCloudMap) {
     sensor_msgs::PointCloud2 laserCloudMap;
     pcl::toROSMsg(*featsFromMap, laserCloudMap);
     laserCloudMap.header.stamp = ros::Time().fromSec(lidar_end_time);
@@ -436,8 +396,7 @@ void publish_map(const ros::Publisher &pubLaserCloudMap)
 }
 
 template <typename T>
-void set_posestamp(T &out)
-{
+void set_posestamp(T& out) {
     out.pose.position.x = state_point.pos(0);
     out.pose.position.y = state_point.pos(1);
     out.pose.position.z = state_point.pos(2);
@@ -449,8 +408,7 @@ void set_posestamp(T &out)
     out.pose.orientation.w = q_.coeffs()[3];
 }
 
-void publish_odometry(const ros::Publisher &pubOdomAftMapped)
-{
+void publish_odometry(const ros::Publisher& pubOdomAftMapped) {
     odomAftMapped.header.frame_id = "camera_init";
     odomAftMapped.child_frame_id = "body";
     odomAftMapped.header.stamp = ros::Time().fromSec(lidar_end_time);
@@ -458,8 +416,7 @@ void publish_odometry(const ros::Publisher &pubOdomAftMapped)
     pubOdomAftMapped.publish(odomAftMapped);
 
     auto P = kf.get_P();
-    for (int i = 0; i < 6; i++)
-    {
+    for (int i = 0; i < 6; i++) {
         int k = i < 3 ? i + 3 : i - 3;
         odomAftMapped.pose.covariance[i * 6 + 0] = P(k, 3);
         odomAftMapped.pose.covariance[i * 6 + 1] = P(k, 4);
@@ -473,8 +430,8 @@ void publish_odometry(const ros::Publisher &pubOdomAftMapped)
     tf::Transform transform;
     tf::Quaternion q;
     transform.setOrigin(tf::Vector3(odomAftMapped.pose.pose.position.x,
-                                    odomAftMapped.pose.pose.position.y,
-                                    odomAftMapped.pose.pose.position.z));
+        odomAftMapped.pose.pose.position.y,
+        odomAftMapped.pose.pose.position.z));
     q.setW(odomAftMapped.pose.pose.orientation.w);
     q.setX(odomAftMapped.pose.pose.orientation.x);
     q.setY(odomAftMapped.pose.pose.orientation.y);
@@ -483,8 +440,7 @@ void publish_odometry(const ros::Publisher &pubOdomAftMapped)
     br.sendTransform(tf::StampedTransform(transform, odomAftMapped.header.stamp, "camera_init", "body"));
 }
 
-void publish_path(const ros::Publisher pubPath)
-{
+void publish_path(const ros::Publisher pubPath) {
     set_posestamp(msg_body_pose);
     msg_body_pose.header.stamp = ros::Time().fromSec(lidar_end_time);
     msg_body_pose.header.frame_id = "camera_init";
@@ -492,15 +448,13 @@ void publish_path(const ros::Publisher pubPath)
     /*** if path is too large, the rvis will crash ***/
     static int jjj = 0;
     jjj++;
-    if (jjj % 10 == 0)
-    {
+    if (jjj % 10 == 0) {
         path.poses.push_back(msg_body_pose);
         pubPath.publish(path);
     }
 }
 
-int main(int argc, char **argv)
-{
+int main(int argc, char** argv) {
     ros::init(argc, argv, "laserMapping");
     ros::NodeHandle nh;
 
@@ -561,7 +515,7 @@ int main(int argc, char **argv)
     Lidar_T_wrt_IMU << VEC_FROM_ARRAY(extrinT);
     Lidar_R_wrt_IMU << MAT_FROM_ARRAY(extrinR);
     p_imu1->set_param(Lidar_T_wrt_IMU, Lidar_R_wrt_IMU, V3D(gyr_cov, gyr_cov, gyr_cov), V3D(acc_cov, acc_cov, acc_cov),
-                      V3D(b_gyr_cov, b_gyr_cov, b_gyr_cov), V3D(b_acc_cov, b_acc_cov, b_acc_cov));
+        V3D(b_gyr_cov, b_gyr_cov, b_gyr_cov), V3D(b_acc_cov, b_acc_cov, b_acc_cov));
 
     signal(SIGINT, SigHandle);
     ros::Rate rate(5000);
@@ -575,8 +529,7 @@ int main(int argc, char **argv)
     state_point.rot = SO3_q;
     kf.change_x(state_point);
 
-    while (ros::ok())
-    {
+    while (ros::ok()) {
         if (flg_exit)
             break;
         ros::spinOnce();
@@ -585,14 +538,12 @@ int main(int argc, char **argv)
         {
             double t00 = omp_get_wtime();
 
-            if (flg_first_scan)
-            {
+            if (flg_first_scan) {
                 first_lidar_time = Measures.lidar_beg_time;
                 p_imu1->first_lidar_time = first_lidar_time;
 
                 string all_points_dir(string(string(ROOT_DIR) + "PCD/") + "GlobalMap.pcd");
-                if (pcl::io::loadPCDFile<PointType>(all_points_dir, *cloud) == -1)
-                {
+                if (pcl::io::loadPCDFile<PointType>(all_points_dir, *cloud) == -1) {
                     PCL_ERROR("Read file fail!\n");
                 }
 
@@ -609,8 +560,7 @@ int main(int argc, char **argv)
             p_imu1->Process(Measures, kf, feats_undistort);
 
             //如果feats_undistort为空 ROS_WARN
-            if (feats_undistort->empty() || (feats_undistort == NULL))
-            {
+            if (feats_undistort->empty() || (feats_undistort == NULL)) {
                 ROS_WARN("No point, skip this scan!\n");
                 continue;
             }
@@ -628,8 +578,7 @@ int main(int argc, char **argv)
             feats_down_size = feats_down_body->points.size();
 
             // std::cout << "feats_down_size :" << feats_down_size << std::endl;
-            if (feats_down_size < 5)
-            {
+            if (feats_down_size < 5) {
                 ROS_WARN("No point, skip this scan!\n");
                 continue;
             }
@@ -667,7 +616,7 @@ int main(int argc, char **argv)
 
             double t11 = omp_get_wtime();
             std::cout << "feats_down_size: " << feats_down_size << "  Whole mapping time(ms):  " << (t11 - t00) * 1000 << std::endl
-                      << std::endl;
+                << std::endl;
         }
 
         rate.sleep();

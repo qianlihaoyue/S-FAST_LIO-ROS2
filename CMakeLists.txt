@@ -1,7 +1,8 @@
 cmake_minimum_required(VERSION 2.8.3)
 project(sfast_lio)
 
-SET(CMAKE_BUILD_TYPE "Debug")
+# SET(CMAKE_BUILD_TYPE "Debug")
+SET(CMAKE_BUILD_TYPE "Release")
 
 ADD_COMPILE_OPTIONS(-std=c++14 )
 ADD_COMPILE_OPTIONS(-std=c++14 )
@@ -56,6 +57,9 @@ find_package(catkin REQUIRED COMPONENTS
 find_package(Eigen3 REQUIRED)
 find_package(PCL 1.8 REQUIRED)
 find_package( Sophus REQUIRED )
+
+set(Sophus_INCLUDE_DIRS "/usr/local/include/sophus")
+set(Sophus_LIBRARIES "/usr/local/lib/libSophus.so")
 
 message(Eigen: ${EIGEN3_INCLUDE_DIR})
 
