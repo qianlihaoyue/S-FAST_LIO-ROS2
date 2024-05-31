@@ -1,13 +1,4 @@
-#ifndef USE_IKFOM_H1
-#define USE_IKFOM_H1
-
-#include <Eigen/Core>
-#include <Eigen/Dense>
-#include <Eigen/Geometry>
-#include <Eigen/Sparse>
-#include <boost/bind.hpp>
-#include <cstdlib>
-#include <vector>
+#pragma once
 
 #include "common_lib.h"
 #include "sophus/so3.h"
@@ -82,5 +73,3 @@ Eigen::Matrix<double, 24, 12> df_dw(state_ikfom s, input_ikfom in) {
     cov.block<3, 3>(18, 9) = Eigen::Matrix3d::Identity();  // 对应公式(7)第5行第4列  I
     return cov;
 }
-
-#endif

@@ -1,16 +1,6 @@
-#ifndef ESEKFOM_EKF_HPP1
-#define ESEKFOM_EKF_HPP1
+#pragma once
 
-#include <ikd-Tree/ikd_Tree.h>
-
-#include <Eigen/Core>
-#include <Eigen/Dense>
-#include <Eigen/Geometry>
-#include <Eigen/Sparse>
-#include <boost/bind.hpp>
-#include <cstdlib>
-#include <vector>
-
+#include "ikd-Tree/ikd_Tree.h"
 #include "use-ikfom.hpp"
 
 // 该hpp主要包含：广义加减法，前向传播主函数，计算特征点残差及其雅可比，ESKF主函数
@@ -146,7 +136,7 @@ public:
 
         if (effct_feat_num < 1) {
             ekfom_data.valid = false;
-            ROS_WARN("No Effective Points! \n");
+            std::cout << "No Effective Points! " << std::endl;
             return;
         }
 
@@ -270,5 +260,3 @@ private:
 };
 
 }  // namespace esekfom
-
-#endif  //  ESEKFOM_EKF_HPP1

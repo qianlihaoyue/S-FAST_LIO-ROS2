@@ -1,20 +1,16 @@
-#ifndef COMMON_LIB_H1
-#define COMMON_LIB_H1
+#pragma once
 
-#include <eigen_conversions/eigen_msg.h>
-#include <nav_msgs/Odometry.h>
-#include <pcl/point_cloud.h>
+#include <deque>
+#include <vector>
+#include <Eigen/Core>
 #include <pcl/point_types.h>
-#include <sensor_msgs/Imu.h>
-#include <sfast_lio/Pose6D.h>
-#include <tf/transform_broadcaster.h>
+#include <pcl/point_cloud.h>
+#include <fast_lio/msg/pose6_d.hpp>
 
-#include <Eigen/Eigen>
+#include <rclcpp/time.hpp>
+#include <sensor_msgs/msg/imu.hpp>
 
-using namespace std;
-using namespace Eigen;
-
-#define PI_M (3.14159265358)
+// #define PI_M (3.14159265358)
 #define G_m_s2 (9.81)  // Gravaty const in GuangDong/China
 #define NUM_MATCH_POINTS (5)
 
@@ -23,14 +19,14 @@ using namespace Eigen;
 #define SKEW_SYM_MATRX(v) 0.0, -v[2], v[1], v[2], 0.0, -v[0], -v[1], v[0], 0.0
 #define DEBUG_FILE_DIR(name) (string(string(ROOT_DIR) + "Log/" + name))
 
-typedef sfast_lio::Pose6D Pose6D;
+typedef fast_lio::msg::Pose6D Pose6D;
 typedef pcl::PointXYZINormal PointType;
 typedef pcl::PointCloud<PointType> PointCloudXYZI;
-typedef vector<PointType, Eigen::aligned_allocator<PointType>> PointVector;
-typedef Vector3d V3D;
-typedef Matrix3d M3D;
-typedef Vector3f V3F;
-typedef Matrix3f M3F;
+typedef std::vector<PointType, Eigen::aligned_allocator<PointType>> PointVector;
+typedef Eigen::Vector3d V3D;
+typedef Eigen::Matrix3d M3D;
+typedef Eigen::Vector3f V3F;
+typedef Eigen::Matrix3f M3F;
 
 M3D Eye3d(M3D::Identity());
 M3F Eye3f(M3F::Identity());
@@ -46,12 +42,12 @@ struct MeasureGroup  // Lidar data and imu dates for the current process
     double lidar_beg_time;
     double lidar_end_time;
     PointCloudXYZI::Ptr lidar;
-    deque<sensor_msgs::Imu::ConstPtr> imu;
+    std::deque<sensor_msgs::msg::Imu::ConstSharedPtr> imu;
 };
 
 template <typename T>
-auto set_pose6d(const double t, const Matrix<T, 3, 1>& a, const Matrix<T, 3, 1>& g, const Matrix<T, 3, 1>& v, const Matrix<T, 3, 1>& p,
-                const Matrix<T, 3, 3>& R) {
+auto set_pose6d(const double t, const Eigen::Matrix<T, 3, 1>& a, const Eigen::Matrix<T, 3, 1>& g, const Eigen::Matrix<T, 3, 1>& v,
+                const Eigen::Matrix<T, 3, 1>& p, const Eigen::Matrix<T, 3, 3>& R) {
     Pose6D rot_kp;
     rot_kp.offset_time = t;
     for (int i = 0; i < 3; i++) {
@@ -70,9 +66,9 @@ float calc_dist(PointType p1, PointType p2) {
 }
 
 template <typename T>
-bool esti_plane(Matrix<T, 4, 1>& pca_result, const PointVector& point, const T& threshold) {
-    Matrix<T, NUM_MATCH_POINTS, 3> A;
-    Matrix<T, NUM_MATCH_POINTS, 1> b;
+bool esti_plane(Eigen::Matrix<T, 4, 1>& pca_result, const PointVector& point, const T& threshold) {
+    Eigen::Matrix<T, NUM_MATCH_POINTS, 3> A;
+    Eigen::Matrix<T, NUM_MATCH_POINTS, 1> b;
     A.setZero();
     b.setOnes();
     b *= -1.0f;
@@ -84,7 +80,7 @@ bool esti_plane(Matrix<T, 4, 1>& pca_result, const PointVector& point, const T& 
         A(j, 2) = point[j].z;
     }
 
-    Matrix<T, 3, 1> normvec = A.colPivHouseholderQr().solve(b);
+    Eigen::Matrix<T, 3, 1> normvec = A.colPivHouseholderQr().solve(b);
 
     T n = normvec.norm();
     // pca_result是平面方程的4个参数  /n是为了归一化
@@ -102,4 +98,11 @@ bool esti_plane(Matrix<T, 4, 1>& pca_result, const PointVector& point, const T& 
     return true;
 }
 
-#endif
+inline double get_time_sec(const builtin_interfaces::msg::Time& time) { return rclcpp::Time(time).seconds(); }
+
+rclcpp::Time get_ros_time(double timestamp) {
+    int32_t sec = std::floor(timestamp);
+    auto nanosec_d = (timestamp - std::floor(timestamp)) * 1e9;
+    uint32_t nanosec = nanosec_d;
+    return rclcpp::Time(sec, nanosec);
+}
