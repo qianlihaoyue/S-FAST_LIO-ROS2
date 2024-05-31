@@ -34,7 +34,7 @@ find_package(rosidl_default_generators REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(PCL REQUIRED)
 
-set(Sophus_INCLUDE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/sophus/include/sophus")
+set(Sophus_INCLUDE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/sophus/include")
 set(Sophus_LIBRARIES "${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/sophus/lib/libSophus.so")
 
 message(Eigen: ${EIGEN3_INCLUDE_DIR})
@@ -66,13 +66,16 @@ set(dependencies
 )
 
 add_executable(fastlio_mapping src/laserMapping.cpp include/ikd-Tree/ikd_Tree.cpp src/preprocess.cpp)
-target_link_libraries(fastlio_mapping  ${PCL_LIBRARIES}  ${Sophus_LIBRARIES})
+target_link_libraries(fastlio_mapping ${PCL_LIBRARIES} ${Sophus_LIBRARIES})
 
 ament_target_dependencies(fastlio_mapping ${dependencies})
 rosidl_target_interfaces(fastlio_mapping ${PROJECT_NAME} "rosidl_typesupport_cpp")
 
 # ---------------- Install --------------- #
-install(TARGETS fastlio_mapping   DESTINATION lib/${PROJECT_NAME} )
+install(TARGETS fastlio_mapping DESTINATION lib/${PROJECT_NAME})
+
+install(FILES ${Sophus_LIBRARIES} DESTINATION lib/${PROJECT_NAME})
+set_target_properties(fastlio_mapping PROPERTIES LINK_FLAGS "-Wl,-rpath=${CMAKE_INSTALL_PREFIX}/lib/${PROJECT_NAME}")
 
 install(
   DIRECTORY config launch

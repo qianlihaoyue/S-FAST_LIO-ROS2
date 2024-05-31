@@ -6,6 +6,7 @@
 - 1.1 - 8.20 - clang-format
 
 - 2.0 - 5.31 - to ros2
+- 2.1 - 5.31 - fix sophus path
 
 
 
