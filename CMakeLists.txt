@@ -34,8 +34,8 @@ find_package(rosidl_default_generators REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(PCL REQUIRED)
 
-set(Sophus_INCLUDE_DIRS "~/pkg/sophus-no-template/include/sophus")
-set(Sophus_LIBRARIES "~/pkg/sophus-no-template/lib/libSophus.so")
+set(Sophus_INCLUDE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/sophus/include/sophus")
+set(Sophus_LIBRARIES "${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/sophus/lib/libSophus.so")
 
 message(Eigen: ${EIGEN3_INCLUDE_DIR})
 

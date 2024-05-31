@@ -45,6 +45,15 @@ Source：Add the line ``` source $Licox_ros_driver_dir$/devel/setup.bash ``` to 
 
 ### 1.4. **Sophus**
 We use the old version of Sophus
+
+```
+cd thirdparty
+chmod +x build.sh
+./build.sh
+
+```
+
+
 ```
 git clone https://github.com/strasdat/Sophus.git
 cd Sophus
