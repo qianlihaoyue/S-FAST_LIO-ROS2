@@ -8,12 +8,6 @@
 const double epsi = 0.001;  // ESKF迭代时，如果dx<epsi 认为收敛
 
 namespace esekfom {
-using namespace Eigen;
-
-PointCloudXYZI::Ptr normvec(new PointCloudXYZI(100000, 1));  // 特征点在地图中对应的平面参数(平面的单位法向量,以及当前点到平面距离)
-PointCloudXYZI::Ptr laserCloudOri(new PointCloudXYZI(100000, 1));  // 有效特征点
-PointCloudXYZI::Ptr corr_normvect(new PointCloudXYZI(100000, 1));  // 有效特征点对应点法相量
-bool point_selected_surf[100000] = {1};                            // 判断是否是有效特征点
 
 struct dyn_share_datastruct {
     bool valid;                                                 // 有效特征点数量是否满足要求
@@ -24,8 +18,13 @@ struct dyn_share_datastruct {
 
 class esekf {
 public:
-    typedef Matrix<double, 24, 24> cov;              // 24X24的协方差矩阵
-    typedef Matrix<double, 24, 1> vectorized_state;  // 24X1的向量
+    typedef Eigen::Matrix<double, 24, 24> cov;              // 24X24的协方差矩阵
+    typedef Eigen::Matrix<double, 24, 1> vectorized_state;  // 24X1的向量
+
+    PointCloudXYZI::Ptr normvec{new PointCloudXYZI(100000, 1)};  // 特征点在地图中对应的平面参数(平面的单位法向量,以及当前点到平面距离)
+    PointCloudXYZI::Ptr laserCloudOri{new PointCloudXYZI(100000, 1)};  // 有效特征点
+    PointCloudXYZI::Ptr corr_normvect{new PointCloudXYZI(100000, 1)};  // 有效特征点对应点法相量
+    bool point_selected_surf[100000] = {1};                            // 判断是否是有效特征点
 
     esekf(){};
     ~esekf(){};
@@ -55,6 +54,46 @@ public:
         return x_r;
     }
 
+    // 对应公式(2) 中的f
+    Eigen::Matrix<double, 24, 1> get_f(state_ikfom s, input_ikfom in) {
+        // 对应顺序为速度(3)，角速度(3),外参T(3),外参旋转R(3)，加速度(3),角速度偏置(3),加速度偏置(3),位置(3)，与论文公式顺序不一致
+        Eigen::Matrix<double, 24, 1> res = Eigen::Matrix<double, 24, 1>::Zero();
+        V3D omega = in.gyro - s.bg;                         // 输入的imu的角速度(也就是实际测量值) - 估计的bias值(对应公式的第1行)
+        V3D a_inertial = s.rot.matrix() * (in.acc - s.ba);  //  输入的imu的加速度，先转到世界坐标系（对应公式的第3行）
+
+        for (int i = 0; i < 3; i++) {
+            res(i) = s.vel[i];                        // 速度（对应公式第2行）
+            res(i + 3) = omega[i];                    // 角速度（对应公式第1行）
+            res(i + 12) = a_inertial[i] + s.grav[i];  // 加速度（对应公式第3行）
+        }
+
+        return res;
+    }
+
+    // 对应公式(7)的Fx  注意该矩阵没乘dt，没加单位阵
+    Eigen::Matrix<double, 24, 24> df_dx(state_ikfom s, input_ikfom in) {
+        Eigen::Matrix<double, 24, 24> cov = Eigen::Matrix<double, 24, 24>::Zero();
+        cov.block<3, 3>(0, 12) = Eigen::Matrix3d::Identity();  // 对应公式(7)第2行第3列   I
+        V3D acc_ = in.acc - s.ba;                              // 测量加速度 = a_m - bias
+
+        cov.block<3, 3>(12, 3) = -s.rot.matrix() * Sophus::SO3::hat(acc_);  // 对应公式(7)第3行第1列
+        cov.block<3, 3>(12, 18) = -s.rot.matrix();                          // 对应公式(7)第3行第5列
+
+        cov.template block<3, 3>(12, 21) = Eigen::Matrix3d::Identity();  // 对应公式(7)第3行第6列   I
+        cov.template block<3, 3>(3, 15) = -Eigen::Matrix3d::Identity();  // 对应公式(7)第1行第4列 (简化为-I)
+        return cov;
+    }
+
+    // 对应公式(7)的Fw  注意该矩阵没乘dt
+    Eigen::Matrix<double, 24, 12> df_dw(state_ikfom s, input_ikfom in) {
+        Eigen::Matrix<double, 24, 12> cov = Eigen::Matrix<double, 24, 12>::Zero();
+        cov.block<3, 3>(12, 3) = -s.rot.matrix();              // 对应公式(7)第3行第2列  -R
+        cov.block<3, 3>(3, 0) = -Eigen::Matrix3d::Identity();  // 对应公式(7)第1行第1列  -A(w dt)简化为-I
+        cov.block<3, 3>(15, 6) = Eigen::Matrix3d::Identity();  // 对应公式(7)第4行第3列  I
+        cov.block<3, 3>(18, 9) = Eigen::Matrix3d::Identity();  // 对应公式(7)第5行第4列  I
+        return cov;
+    }
+
     // 前向传播  公式(4-8)
     void predict(double& dt, Eigen::Matrix<double, 12, 12>& Q, const input_ikfom& i_in) {
         Eigen::Matrix<double, 24, 1> f_ = get_f(x_, i_in);     // 公式(3)的f
@@ -63,10 +102,14 @@ public:
 
         x_ = boxplus(x_, f_ * dt);  // 前向传播 公式(4)
 
-        f_x_ = Matrix<double, 24, 24>::Identity() + f_x_ * dt;  // 之前Fx矩阵里的项没加单位阵，没乘dt   这里补上
+        f_x_ = Eigen::Matrix<double, 24, 24>::Identity() + f_x_ * dt;  // 之前Fx矩阵里的项没加单位阵，没乘dt   这里补上
 
         P_ = (f_x_)*P_ * (f_x_).transpose() + (dt * f_w_) * Q * (dt * f_w_).transpose();  // 传播协方差矩阵，即公式(8)
     }
+
+    double ratio_all = 0.;
+    void get_match_ratio(double& all) { all = ratio_all; }
+    double get_match_ratio() { return ratio_all; }
 
     // 计算每个特征点的残差及H矩阵
     void h_share_model(dyn_share_datastruct& ekfom_data, PointCloudXYZI::Ptr& feats_down_body, KD_TREE<PointType>& ikdtree, vector<PointVector>& Nearest_Points,
@@ -105,8 +148,8 @@ public:
             }
             if (!point_selected_surf[i]) continue;  // 如果该点不满足条件  不进行下面步骤
 
-            Matrix<float, 4, 1> pabcd;       // 平面点信息
-            point_selected_surf[i] = false;  // 将该点设置为无效点，用来判断是否满足条件
+            Eigen::Matrix<float, 4, 1> pabcd;  // 平面点信息
+            point_selected_surf[i] = false;    // 将该点设置为无效点，用来判断是否满足条件
             // 拟合平面方程ax+by+cz+d=0并求解点到平面距离
             if (esti_plane(pabcd, points_near, 0.1f)) {
                 float pd2 = pabcd(0) * point_world.x + pabcd(1) * point_world.y + pabcd(2) * point_world.z + pabcd(3);  // 当前点到平面的距离
@@ -133,6 +176,7 @@ public:
                 effct_feat_num++;
             }
         }
+        ratio_all = (float)effct_feat_num / feats_down_size;
 
         if (effct_feat_num < 1) {
             ekfom_data.valid = false;
@@ -141,7 +185,7 @@ public:
         }
 
         // 雅可比矩阵H和残差向量的计算
-        ekfom_data.h_x = MatrixXd::Zero(effct_feat_num, 12);
+        ekfom_data.h_x = Eigen::MatrixXd::Zero(effct_feat_num, 12);
         ekfom_data.h.resize(effct_feat_num);
 
         for (int i = 0; i < effct_feat_num; i++) {
@@ -217,17 +261,17 @@ public:
             dx_new = boxminus(x_, x_propagated);  // 公式(18)中的 x^k - x^
 
             // 由于H矩阵是稀疏的，只有前12列有非零元素，后12列是零 因此这里采用分块矩阵的形式计算 减少计算量
-            auto H = dyn_share.h_x;                                              // m X 12 的矩阵
-            Eigen::Matrix<double, 24, 24> HTH = Matrix<double, 24, 24>::Zero();  // 矩阵 H^T * H
+            auto H = dyn_share.h_x;                                                     // m X 12 的矩阵
+            Eigen::Matrix<double, 24, 24> HTH = Eigen::Matrix<double, 24, 24>::Zero();  // 矩阵 H^T * H
             HTH.block<12, 12>(0, 0) = H.transpose() * H;
 
             auto K_front = (HTH / R + P_.inverse()).inverse();
             Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic> K;
             K = K_front.block<24, 12>(0, 0) * H.transpose() / R;  // 卡尔曼增益  这里R视为常数
 
-            Eigen::Matrix<double, 24, 24> KH = Matrix<double, 24, 24>::Zero();  // 矩阵 K * H
+            Eigen::Matrix<double, 24, 24> KH = Eigen::Matrix<double, 24, 24>::Zero();  // 矩阵 K * H
             KH.block<24, 12>(0, 0) = K * H;
-            Matrix<double, 24, 1> dx_ = K * dyn_share.h + (KH - Matrix<double, 24, 24>::Identity()) * dx_new;  // 公式(18)
+            Eigen::Matrix<double, 24, 1> dx_ = K * dyn_share.h + (KH - Eigen::Matrix<double, 24, 24>::Identity()) * dx_new;  // 公式(18)
             // std::cout << "dx_: " << dx_.transpose() << std::endl;
             x_ = boxplus(x_, dx_);  // 公式(18)
 
@@ -248,7 +292,7 @@ public:
             }
 
             if (t > 1 || i == maximum_iter - 1) {
-                P_ = (Matrix<double, 24, 24>::Identity() - KH) * P_;  // 公式(19)
+                P_ = (Eigen::Matrix<double, 24, 24>::Identity() - KH) * P_;  // 公式(19)
                 return;
             }
         }

@@ -28,10 +28,10 @@ typedef Eigen::Matrix3d M3D;
 typedef Eigen::Vector3f V3F;
 typedef Eigen::Matrix3f M3F;
 
-M3D Eye3d(M3D::Identity());
-M3F Eye3f(M3F::Identity());
-V3D Zero3d(0, 0, 0);
-V3F Zero3f(0, 0, 0);
+#define Eye3d M3D::Identity()
+#define Eye3f M3F::Identity()
+#define Zero3d V3D::Zero()
+#define Zero3f V3F::Zero()
 
 struct MeasureGroup  // Lidar data and imu dates for the current process
 {
@@ -57,10 +57,10 @@ auto set_pose6d(const double t, const Eigen::Matrix<T, 3, 1>& a, const Eigen::Ma
         rot_kp.pos[i] = p(i);
         for (int j = 0; j < 3; j++) rot_kp.rot[i * 3 + j] = R(i, j);
     }
-    return move(rot_kp);
+    return std::move(rot_kp);
 }
 
-float calc_dist(PointType p1, PointType p2) {
+inline float calc_dist(PointType p1, PointType p2) {
     float d = (p1.x - p2.x) * (p1.x - p2.x) + (p1.y - p2.y) * (p1.y - p2.y) + (p1.z - p2.z) * (p1.z - p2.z);
     return d;
 }
@@ -100,7 +100,7 @@ bool esti_plane(Eigen::Matrix<T, 4, 1>& pca_result, const PointVector& point, co
 
 inline double get_time_sec(const builtin_interfaces::msg::Time& time) { return rclcpp::Time(time).seconds(); }
 
-rclcpp::Time get_ros_time(double timestamp) {
+inline rclcpp::Time get_ros_time(double timestamp) {
     int32_t sec = std::floor(timestamp);
     auto nanosec_d = (timestamp - std::floor(timestamp)) * 1e9;
     uint32_t nanosec = nanosec_d;

@@ -1,8 +1,7 @@
 cmake_minimum_required(VERSION 3.5)
 project(fast_lio)
 
-# SET(CMAKE_BUILD_TYPE "Debug")
-SET(CMAKE_BUILD_TYPE "Release")
+SET(CMAKE_BUILD_TYPE "Release") # Debug
 
 add_definitions(-DROOT_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/\")
 
@@ -65,11 +64,21 @@ set(dependencies
   livox_ros_driver2
 )
 
-add_executable(fastlio_mapping src/laserMapping.cpp include/ikd-Tree/ikd_Tree.cpp src/preprocess.cpp)
-target_link_libraries(fastlio_mapping ${PCL_LIBRARIES} ${Sophus_LIBRARIES})
+add_library(fastlio_lib
+  src/laserMapping.cpp
+  src/laserMappingUtility.cpp
+  src/IMU_Processing.cpp
+  src/preprocess.cpp
+  include/ikd-Tree/ikd_Tree.cpp
+)
+target_link_libraries(fastlio_lib ${PCL_LIBRARIES} ${Sophus_LIBRARIES})
+ament_target_dependencies(fastlio_lib ${dependencies})
+rosidl_target_interfaces(fastlio_lib ${PROJECT_NAME} "rosidl_typesupport_cpp")
+install(TARGETS fastlio_lib DESTINATION lib/${PROJECT_NAME})
 
-ament_target_dependencies(fastlio_mapping ${dependencies})
-rosidl_target_interfaces(fastlio_mapping ${PROJECT_NAME} "rosidl_typesupport_cpp")
+# ---------------- app --------------- #
+add_executable(fastlio_mapping app/main.cpp)
+target_link_libraries(fastlio_mapping fastlio_lib)
 
 # ---------------- Install --------------- #
 install(TARGETS fastlio_mapping DESTINATION lib/${PROJECT_NAME})

@@ -12,7 +12,7 @@ def generate_launch_description():
 
     fast_lio_node = Node(
         package='fast_lio',
-        executable='fastlio_localization',
+        executable='fastlio_mapping',
         parameters=[config_file],
         output='screen'
     )
