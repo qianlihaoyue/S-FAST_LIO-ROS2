@@ -61,7 +61,7 @@ public:
     Preprocess();
     ~Preprocess();
 
-    void process(const livox_ros_driver2::msg::CustomMsg::UniquePtr &msg, pcl::PointCloud<PointType>::Ptr &pcl_out, const bool &mode = false);
+    void process(const livox_ros_driver2::msg::CustomMsg::UniquePtr &msg, pcl::PointCloud<PointType>::Ptr &pcl_out);
     void process(const sensor_msgs::msg::PointCloud2::UniquePtr &msg, pcl::PointCloud<PointType>::Ptr &pcl_out);
     void set(int lid_type, double bld, int pfilt_num);
 

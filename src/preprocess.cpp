@@ -14,13 +14,10 @@ void Preprocess::set(int lid_type, double bld, int pfilt_num) {
     point_filter_num = pfilt_num;
 }
 
-void Preprocess::process(const livox_ros_driver2::msg::CustomMsg::UniquePtr &msg, pcl::PointCloud<PointType>::Ptr &pcl_out, const bool &mode) {
+void Preprocess::process(const livox_ros_driver2::msg::CustomMsg::UniquePtr &msg, pcl::PointCloud<PointType>::Ptr &pcl_out) {
     avia_handler(msg);
-    if (!mode) {
-        *pcl_out = pl_full;
-    } else {
-        *pcl_out = pl_surf;
-    }
+    // *pcl_out = pl_full;
+    *pcl_out = pl_surf;
 }
 
 void Preprocess::process(const sensor_msgs::msg::PointCloud2::UniquePtr &msg, pcl::PointCloud<PointType>::Ptr &pcl_out) {
