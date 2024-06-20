@@ -23,7 +23,6 @@ public:
     void readParameters();
     void initLIO();
 
-    BoxPointType LocalMap_Points;       // ikd-tree地图立方体的2个角点
     bool Localmap_Initialized = false;  // 局部地图是否初始化
     void lasermap_fov_segment();
     void map_incremental();
@@ -36,13 +35,15 @@ public:
     /*** Time Log Variables ***/
     int add_point_size = 0, kdtree_delete_counter = 0;
     bool time_sync_en = false, extrinsic_est_en = true, path_en = true, runtime_pos_log = false;
+    FILE* fp;
+    void dump_lio_state_to_log(FILE* fp);
     /**************************/
 
     float DET_RANGE = 300.0f;
     const float MOV_THRESHOLD = 1.5f;
     double time_diff_lidar_to_imu = 0.0;
 
-    mutex mtx_buffer;
+    std::mutex mtx_buffer;
 
     std::string lid_topic, imu_topic;
 
@@ -54,7 +55,6 @@ public:
     bool lidar_pushed, flg_first_scan = true, flg_EKF_inited;
     bool scan_pub_en = false, dense_pub_en = false;
 
-    std::vector<BoxPointType> cub_needrm;
     std::vector<PointVector> Nearest_Points;
     std::vector<double> extrinT{3, 0.0};
     std::vector<double> extrinR{9, 0.0};
@@ -87,7 +87,14 @@ public:
     pcl::VoxelGrid<PointType> downSizeFilterSurf;
     pcl::VoxelGrid<PointType> downSizeFilterMap;
 
+#ifdef USE_IKDTREE
     KD_TREE<PointType> ikdtree;
+    BoxPointType LocalMap_Points;  // ikd-tree地图立方体的2个角点
+    std::vector<BoxPointType> cub_needrm;
+#else
+    using IVoxType = IVox<PointType>;
+    std::shared_ptr<IVoxType> ivox_ = nullptr;  // localmap in ivox
+#endif
 
     V3D Lidar_T_wrt_IMU{Zero3d};
     M3D Lidar_R_wrt_IMU{Eye3d};
@@ -104,8 +111,8 @@ public:
     nav_msgs::msg::Odometry odomAftMapped;
     geometry_msgs::msg::PoseStamped msg_body_pose;
 
-    shared_ptr<Preprocess> p_pre{new Preprocess()};
-    shared_ptr<ImuProcess> p_imu{new ImuProcess()};
+    std::shared_ptr<Preprocess> p_pre{new Preprocess()};
+    std::shared_ptr<ImuProcess> p_imu{new ImuProcess()};
 
     LaserMapping(const rclcpp::NodeOptions& options = rclcpp::NodeOptions()) : Node("laser_mapping", options) {
         readParameters();

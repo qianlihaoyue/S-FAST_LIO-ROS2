@@ -5,7 +5,7 @@ SET(CMAKE_BUILD_TYPE "Release") # Debug
 
 add_definitions(-DROOT_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/\")
 
-set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -pthread -std=c++0x -fexceptions")
@@ -63,6 +63,14 @@ set(dependencies
   pcl_conversions
   livox_ros_driver2
 )
+
+option(WITH_USE_IKDTREE "Use IKDTREE or IVOX" OFF)
+if (0)
+    message("USE_IKDTREE")
+    add_definitions(-DUSE_IKDTREE)
+else ()
+    message("USE_IVOX")
+endif()
 
 add_library(fastlio_lib
   src/laserMapping.cpp

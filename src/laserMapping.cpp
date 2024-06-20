@@ -34,11 +34,12 @@ void LaserMapping::initLIO() {
 void LaserMapping::initLoc() {
     declare_and_get_parameter<bool>("loc.en", loc_mode, false);
     if (loc_mode) {
-        declare_and_get_parameter<string>("loc.loadmap_dir", loadmap_dir, string(ROOT_DIR) + "PCD/");
+        declare_and_get_parameter<std::string>("loc.loadmap_dir", loadmap_dir, std::string(ROOT_DIR) + "PCD/");
 
         // 加载读取点云数据到cloud中
-        string all_points_dir(loadmap_dir + "scans.pcd");
+        std::string all_points_dir(loadmap_dir + "scans.pcd");
         if (pcl::io::loadPCDFile<PointType>(all_points_dir, *prior_cloud) == -1) std::cerr << "Read file fail! " << all_points_dir << std::endl;
+#ifdef USE_IKDTREE
         ikdtree.set_downsample_param(filter_size_map_min);
         ikdtree.Build(prior_cloud->points);
         std::cout << "---- ikdtree size: " << ikdtree.size() << std::endl;
@@ -51,8 +52,18 @@ void LaserMapping::initLoc() {
             while (pubLaserCloudMap->get_subscription_count() == 0) std::this_thread::sleep_for(std::chrono::seconds(1));
             publish_map(pubLaserCloudMap);
         }
+#else
+        ivox_->AddPoints(prior_cloud->points);
+        if (scan_pub_en) {
+            // TODO:
+            // ivox_.get()
+            // featsFromMap->clear();
+            // while (pubLaserCloudMap->get_subscription_count() == 0) std::this_thread::sleep_for(std::chrono::seconds(1));
+            // publish_map(pubLaserCloudMap);
+        }
+#endif
 
-        declare_and_get_parameter<vector<double>>("loc.init_guess", init_guess, vector<double>());
+        declare_and_get_parameter<std::vector<double>>("loc.init_guess", init_guess, std::vector<double>());
         state_point = kf.get_x();
         // state_point.pos = Eigen::Vector3d(init_guess[3], init_guess[4], init_guess[5]);
 
@@ -71,6 +82,7 @@ void LaserMapping::initLoc() {
 }
 
 void LaserMapping::lasermap_fov_segment() {
+#ifdef USE_IKDTREE
     cub_needrm.clear();  // 清空需要移除的区域
     kdtree_delete_counter = 0;
 
@@ -120,6 +132,7 @@ void LaserMapping::lasermap_fov_segment() {
     ikdtree.acquire_removed_points(points_history);
 
     if (cub_needrm.size() > 0) kdtree_delete_counter = ikdtree.Delete_Point_Boxes(cub_needrm);  // 删除指定范围内的点
+#endif
 }
 
 // 根据最新估计位姿  增量添加点云到map
@@ -128,6 +141,8 @@ void LaserMapping::map_incremental() {
     PointVector PointNoNeedDownsample;
     PointToAdd.reserve(feats_down_size);
     PointNoNeedDownsample.reserve(feats_down_size);
+
+#ifdef USE_IKDTREE
     for (int i = 0; i < feats_down_size; i++) {
         // 转换到世界坐标系
         // pointBodyToWorld(&(feats_down_body->points[i]), &(feats_down_world->points[i]));
@@ -164,6 +179,35 @@ void LaserMapping::map_incremental() {
     add_point_size = ikdtree.Add_Points(PointToAdd, true);
     ikdtree.Add_Points(PointNoNeedDownsample, false);
     add_point_size = PointToAdd.size() + PointNoNeedDownsample.size();
+#else
+    // TODO:
+
+    for (size_t i = 0; i < feats_down_size; ++i) {
+        /* decide if need add to map */
+        PointType &point_world = feats_down_world->points[i];
+        if (!Nearest_Points[i].empty()) {
+            const PointVector &points_near = Nearest_Points[i];
+
+            Eigen::Vector3f center = ((point_world.getVector3fMap() / filter_size_map_min).array().floor() + 0.5) * filter_size_map_min;
+            bool need_add = true;
+            for (int readd_i = 0; readd_i < points_near.size(); readd_i++) {
+                Eigen::Vector3f dis_2_center = points_near[readd_i].getVector3fMap() - center;
+                if (fabs(dis_2_center.x()) < 0.5 * filter_size_map_min && fabs(dis_2_center.y()) < 0.5 * filter_size_map_min &&
+                    fabs(dis_2_center.z()) < 0.5 * filter_size_map_min) {
+                    need_add = false;
+                    break;
+                }
+            }
+            if (need_add) {
+                PointToAdd.emplace_back(point_world);
+            }
+        } else {
+            PointToAdd.emplace_back(point_world);
+        }
+    }
+    ivox_->AddPoints(PointToAdd);
+
+#endif
 }
 
 void LaserMapping::timer_callback() {
@@ -202,6 +246,7 @@ void LaserMapping::timer_callback() {
             return;
         }
 
+#ifdef USE_IKDTREE
         // 初始化ikdtree(ikdtree为空时)
         if (loc_mode == false && ikdtree.Root_Node == nullptr) {
             ikdtree.set_downsample_param(filter_size_map_min);
@@ -209,11 +254,22 @@ void LaserMapping::timer_callback() {
             ikdtree.Build(feats_down_world->points);  // 根据世界坐标系下的点构建ikdtree
             return;
         }
+#else
+        if (loc_mode == false && ivox_->NumValidGrids() == 0) {
+            for (int i = 0; i < feats_down_size; i++) pointBodyToWorld(&(feats_down_body->points[i]), &(feats_down_world->points[i]));
+            ivox_->AddPoints(feats_down_world->points);  // 根据世界坐标系下的点构建ikdtree
+            return;
+        }
+#endif
 
         double t1 = omp_get_wtime();
         /*** iterated state estimation ***/
         Nearest_Points.resize(feats_down_size);  // 存储近邻点的vector
+#ifdef USE_IKDTREE
         kf.update_iterated_dyn_share_modified(LASER_POINT_COV, feats_down_body, ikdtree, Nearest_Points, NUM_MAX_ITERATIONS, extrinsic_est_en);
+#else
+        kf.update_iterated_dyn_share_modified(LASER_POINT_COV, feats_down_body, *ivox_, Nearest_Points, NUM_MAX_ITERATIONS, extrinsic_est_en);
+#endif
         double t2 = omp_get_wtime();
 
         state_point = kf.get_x();
@@ -233,9 +289,13 @@ void LaserMapping::timer_callback() {
         double t3 = omp_get_wtime();
 
         if (runtime_pos_log) {
+#ifndef USE_IKDTREE
+            printf("grid: %d ", (int)ivox_->NumValidGrids());
+#endif
             printf("ds: %d match: %d%% ", feats_down_size, (int)(kf.get_match_ratio() * 100));
             printf("[tim] ICP: %0.2f total: %0.2f", (t2 - t1) * 1000.0, (t3 - t0) * 1000.0);
             std::cout << std::endl;
+            if (fp) dump_lio_state_to_log(fp);
         }
     }
 }

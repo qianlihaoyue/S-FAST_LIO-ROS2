@@ -10,6 +10,9 @@
 - 2.2 - 6.3 - 封装 & 测试
 
 
+- branch
+    - ivox - 1.0 - 6.20
+
 
 ## Simplified Implementation of FAST_LIO
 

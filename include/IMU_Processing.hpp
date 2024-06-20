@@ -45,7 +45,7 @@ private:
 
     PointCloudXYZI::Ptr cur_pcl_un_;                  // 当前帧点云未去畸变
     sensor_msgs::msg::Imu::ConstSharedPtr last_imu_;  // 上一帧imu
-    vector<Pose6D> IMUpose;                           // 存储imu位姿(反向传播用)
+    std::vector<Pose6D> IMUpose;                           // 存储imu位姿(反向传播用)
     M3D Lidar_R_wrt_IMU;                              // lidar到IMU的旋转外参
     V3D Lidar_T_wrt_IMU;                              // lidar到IMU的平移外参
     V3D mean_acc;                                     // 加速度均值,用于计算方差

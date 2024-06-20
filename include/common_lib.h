@@ -17,7 +17,7 @@
 #define VEC_FROM_ARRAY(v) v[0], v[1], v[2]
 #define MAT_FROM_ARRAY(v) v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7], v[8]
 #define SKEW_SYM_MATRX(v) 0.0, -v[2], v[1], v[2], 0.0, -v[0], -v[1], v[0], 0.0
-#define DEBUG_FILE_DIR(name) (string(string(ROOT_DIR) + "Log/" + name))
+#define DEBUG_FILE_DIR(name) (std::string(std::string(ROOT_DIR) + "Log/" + name))
 
 typedef fast_lio::msg::Pose6D Pose6D;
 typedef pcl::PointXYZINormal PointType;

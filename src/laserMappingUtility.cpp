@@ -7,8 +7,8 @@ void LaserMapping::readParameters() {
     declare_and_get_parameter<bool>("publish.dense_publish_en", dense_pub_en, false);
     declare_and_get_parameter<bool>("publish.runtime_pos_log", runtime_pos_log, true);
 
-    declare_and_get_parameter<string>("common.lid_topic", lid_topic, "/livox/lidar");
-    declare_and_get_parameter<string>("common.imu_topic", imu_topic, "/livox/imu");
+    declare_and_get_parameter<std::string>("common.lid_topic", lid_topic, "/livox/lidar");
+    declare_and_get_parameter<std::string>("common.imu_topic", imu_topic, "/livox/imu");
     declare_and_get_parameter<bool>("common.time_sync_en", time_sync_en, false);  // 时间同步
     declare_and_get_parameter<double>("common.time_offset_lidar_to_imu", time_diff_lidar_to_imu, 0.0);
 
@@ -33,13 +33,35 @@ void LaserMapping::readParameters() {
 
     declare_and_get_parameter<int>("pcd_save.pcd_save_en", pcd_save_en, false);
     declare_and_get_parameter<double>("pcd_save.filter_size_savemap", filter_size_savemap, 0.2);
-    declare_and_get_parameter<string>("pcd_save.savemap_dir", savemap_dir, string(ROOT_DIR) + "PCD/");
+    declare_and_get_parameter<std::string>("pcd_save.savemap_dir", savemap_dir, std::string(ROOT_DIR) + "/");
     downSizeFilterSaveMap.setLeafSize(filter_size_savemap, filter_size_savemap, filter_size_savemap);
+    fp = fopen((savemap_dir + "/pos_log.csv").c_str(), "w");
+    if (fp == nullptr) std::cerr << "Failed to open file for writing" << std::endl;
 
-    declare_and_get_parameter<vector<double>>("mapping.extrinsic_T", extrinT, vector<double>());  // 雷达相对于IMU的外参T（即雷达在IMU坐标系中的坐标）
-    declare_and_get_parameter<vector<double>>("mapping.extrinsic_R", extrinR, vector<double>());  // 雷达相对于IMU的外参R
+    declare_and_get_parameter<std::vector<double>>("mapping.extrinsic_T", extrinT, std::vector<double>());  // 雷达相对于IMU的外参T（即雷达在IMU坐标系中的坐标）
+    declare_and_get_parameter<std::vector<double>>("mapping.extrinsic_R", extrinR, std::vector<double>());  // 雷达相对于IMU的外参R
 
     std::cout << "Lidar_type: " << p_pre->lidar_type << std::endl;
+
+#ifndef USE_IKDTREE
+    IVoxType::Options ivox_options_;
+    declare_and_get_parameter<float>("ivox_grid_resolution", ivox_options_.resolution_, 0.2);
+    int ivox_nearby_type;
+    declare_and_get_parameter<int>("ivox_nearby_type", ivox_nearby_type, 18);
+    if (ivox_nearby_type == 0)
+        ivox_options_.nearby_type_ = IVoxType::NearbyType::CENTER;
+    else if (ivox_nearby_type == 6)
+        ivox_options_.nearby_type_ = IVoxType::NearbyType::NEARBY6;
+    else if (ivox_nearby_type == 18)
+        ivox_options_.nearby_type_ = IVoxType::NearbyType::NEARBY18;
+    else if (ivox_nearby_type == 26)
+        ivox_options_.nearby_type_ = IVoxType::NearbyType::NEARBY26;
+    else {
+        std::cerr << "unknown ivox_nearby_type, use NEARBY18" << std::endl;
+        ivox_options_.nearby_type_ = IVoxType::NearbyType::NEARBY18;
+    }
+    ivox_ = std::make_shared<IVoxType>(ivox_options_);
+#endif
 }
 
 void LaserMapping::standard_pcl_cbk(const sensor_msgs::msg::PointCloud2::UniquePtr msg) {
@@ -236,6 +258,24 @@ void LaserMapping::publish_path(rclcpp::Publisher<nav_msgs::msg::Path>::SharedPt
         path.poses.push_back(msg_body_pose);
         pubPath->publish(path);
     }
+}
+
+void LaserMapping::dump_lio_state_to_log(FILE* fp) {
+    auto x_ = kf.get_x();
+    V3D rot_ang = x_.rot.matrix().eulerAngles(2, 1, 0);  // ZYX顺序
+
+    fprintf(fp, "%lf ,", Measures.lidar_beg_time - first_lidar_time);
+    fprintf(fp, "%lf ,%lf ,%lf ,", rot_ang(0), rot_ang(1), rot_ang(2));  // Angle
+    fprintf(fp, "%lf ,%lf ,%lf ,", x_.pos(0), x_.pos(1), x_.pos(2));     // Pos
+    fprintf(fp, "%lf ,%lf ,%lf ,", 0.0, 0.0, 0.0);                       // omega
+    fprintf(fp, "%lf ,%lf ,%lf ,", x_.vel(0), x_.vel(1), x_.vel(2));     // Vel
+    fprintf(fp, "%lf ,%lf ,%lf ,", 0.0, 0.0, 0.0);                       // Acc
+    fprintf(fp, "%lf ,%lf ,%lf ,", x_.bg(0), x_.bg(1), x_.bg(2));        // Bias_g
+    fprintf(fp, "%lf ,%lf ,%lf ,", x_.ba(0), x_.ba(1), x_.ba(2));        // Bias_a
+    fprintf(fp, "%lf ,%lf ,%lf ", x_.grav(0), x_.grav(1), x_.grav(2));   // Bias_a
+    fprintf(fp, "\r\n");
+
+    fflush(fp);
 }
 
 void LaserMapping::saveMap() { saveMap(savemap_dir); }

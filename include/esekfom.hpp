@@ -1,7 +1,14 @@
 #pragma once
 
-#include "ikd-Tree/ikd_Tree.h"
 #include "use-ikfom.hpp"
+
+#if USE_IKDTREE
+#include "ikd-Tree/ikd_Tree.h"
+using MapType = KD_TREE<PointType>;
+#else
+#include "ivox3d/ivox3d.h"
+using MapType = IVox<PointType>;
+#endif
 
 // 该hpp主要包含：广义加减法，前向传播主函数，计算特征点残差及其雅可比，ESKF主函数
 
@@ -112,7 +119,7 @@ public:
     double get_match_ratio() { return ratio_all; }
 
     // 计算每个特征点的残差及H矩阵
-    void h_share_model(dyn_share_datastruct& ekfom_data, PointCloudXYZI::Ptr& feats_down_body, KD_TREE<PointType>& ikdtree, vector<PointVector>& Nearest_Points,
+    void h_share_model(dyn_share_datastruct& ekfom_data, PointCloudXYZI::Ptr& feats_down_body, MapType& map, std::vector<PointVector>& Nearest_Points,
                        bool extrinsic_est) {
         int feats_down_size = feats_down_body->points.size();
         laserCloudOri->clear();
@@ -136,15 +143,21 @@ public:
             point_world.z = p_global(2);
             point_world.intensity = point_body.intensity;
 
-            vector<float> pointSearchSqDis(NUM_MATCH_POINTS);
             auto& points_near = Nearest_Points[i];  // Nearest_Points[i]打印出来发现是按照离point_world距离，从小到大的顺序的vector
 
             double ta = omp_get_wtime();
             if (ekfom_data.converge) {
-                // 寻找point_world的最近邻的平面点
-                ikdtree.Nearest_Search(point_world, NUM_MATCH_POINTS, points_near, pointSearchSqDis);
+// 寻找point_world的最近邻的平面点
+#ifdef USE_IKDTREE
+                std::vector<float> pointSearchSqDis(NUM_MATCH_POINTS);
+                map.Nearest_Search(point_world, NUM_MATCH_POINTS, points_near, pointSearchSqDis);
                 // 判断是否是有效匹配点，与loam系列类似，要求特征点最近邻的地图点数量>阈值，距离<阈值  满足条件的才置为true
                 point_selected_surf[i] = points_near.size() < NUM_MATCH_POINTS ? false : pointSearchSqDis[NUM_MATCH_POINTS - 1] > 5 ? false : true;
+#else
+                map.GetClosestPoint(point_world, points_near, NUM_MATCH_POINTS);
+                // 判断是否是有效匹配点，与loam系列类似，要求特征点最近邻的地图点数量>阈值，距离<阈值  满足条件的才置为true
+                point_selected_surf[i] = points_near.size() < NUM_MATCH_POINTS ? false : true;
+#endif
             }
             if (!point_selected_surf[i]) continue;  // 如果该点不满足条件  不进行下面步骤
 
@@ -234,7 +247,7 @@ public:
     }
 
     // ESKF
-    void update_iterated_dyn_share_modified(double R, PointCloudXYZI::Ptr& feats_down_body, KD_TREE<PointType>& ikdtree, vector<PointVector>& Nearest_Points,
+    void update_iterated_dyn_share_modified(double R, PointCloudXYZI::Ptr& feats_down_body, MapType& map, std::vector<PointVector>& Nearest_Points,
                                             int maximum_iter, bool extrinsic_est) {
         normvec->resize(int(feats_down_body->points.size()));
 
@@ -251,7 +264,7 @@ public:
         {
             dyn_share.valid = true;
             // 计算雅克比，也就是点面残差的导数 H(代码里是h_x)
-            h_share_model(dyn_share, feats_down_body, ikdtree, Nearest_Points, extrinsic_est);
+            h_share_model(dyn_share, feats_down_body, map, Nearest_Points, extrinsic_est);
 
             if (!dyn_share.valid) {
                 continue;
