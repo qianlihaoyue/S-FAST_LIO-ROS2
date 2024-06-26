@@ -23,7 +23,7 @@ void LaserMapping::initLIO() {
     timer_ = rclcpp::create_timer(this, this->get_clock(), std::chrono::milliseconds(10), std::bind(&LaserMapping::timer_callback, this));
 
     downSizeFilterSurf.setLeafSize(filter_size_surf_min, filter_size_surf_min, filter_size_surf_min);
-    downSizeFilterMap.setLeafSize(filter_size_map_min, filter_size_map_min, filter_size_map_min);
+    // downSizeFilterMap.setLeafSize(filter_size_map_min, filter_size_map_min, filter_size_map_min);
 
     Lidar_T_wrt_IMU << VEC_FROM_ARRAY(extrinT);
     Lidar_R_wrt_IMU << MAT_FROM_ARRAY(extrinR);
@@ -146,10 +146,10 @@ void LaserMapping::map_incremental() {
                 PointNoNeedDownsample.push_back(feats_down_world->points[i]);  // 如果距离最近的点都在体素外，则该点不需要Downsample
                 continue;
             }
-            for (int j = 0; j < NUM_MATCH_POINTS; j++) {
-                if (points_near.size() < NUM_MATCH_POINTS) break;
-                if (calc_dist(points_near[j], mid_point) < dist)  // 如果近邻点距离 < 当前点距离，不添加该点
-                {
+            for (int j = 0; j < kf.NUM_MATCH_POINTS; j++) {
+                if (points_near.size() < kf.NUM_MATCH_POINTS) break;
+                // 如果近邻点距离 < 当前点距离，不添加该点
+                if (calc_dist(points_near[j], mid_point) < dist) {
                     need_add = false;
                     break;
                 }
@@ -213,7 +213,7 @@ void LaserMapping::timer_callback() {
         double t1 = omp_get_wtime();
         /*** iterated state estimation ***/
         Nearest_Points.resize(feats_down_size);  // 存储近邻点的vector
-        kf.update_iterated_dyn_share_modified(LASER_POINT_COV, feats_down_body, ikdtree, Nearest_Points, NUM_MAX_ITERATIONS, extrinsic_est_en);
+        kf.update_iterated_dyn_share_modified(LASER_POINT_COV, feats_down_body, ikdtree, Nearest_Points);
         double t2 = omp_get_wtime();
 
         state_point = kf.get_x();
@@ -236,6 +236,7 @@ void LaserMapping::timer_callback() {
             printf("ds: %d match: %d%% ", feats_down_size, (int)(kf.get_match_ratio() * 100));
             printf("[tim] ICP: %0.2f total: %0.2f", (t2 - t1) * 1000.0, (t3 - t0) * 1000.0);
             std::cout << std::endl;
+            if (fp) dump_lio_state_to_log(fp);
         }
     }
 }

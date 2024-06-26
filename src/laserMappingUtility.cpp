@@ -1,5 +1,24 @@
 #include "laserMapping.hpp"
-#include <pcl/io/pcd_io.h>
+
+#include <sys/stat.h>  // mkdir, stat
+
+inline bool createDirectoryIfNotExists(const std::string& path) {
+    struct stat info;
+    if (stat(path.c_str(), &info) != 0) {
+        // Directory does not exist, create it
+        if (mkdir(path.c_str(), 0755) == 0) {
+            return true;
+        } else {
+            std::cerr << "Error creating directory: " << path << std::endl;
+            return false;
+        }
+    } else if (info.st_mode & S_IFDIR) {
+        return true;
+    } else {
+        std::cerr << "Path exists but is not a directory: " << path << std::endl;
+        return false;
+    }
+}
 
 void LaserMapping::readParameters() {
     declare_and_get_parameter<bool>("publish.path_en", path_en, true);
@@ -14,8 +33,13 @@ void LaserMapping::readParameters() {
 
     declare_and_get_parameter<double>("common.filter_size_surf", filter_size_surf_min, 0.5);
     declare_and_get_parameter<double>("common.filter_size_map", filter_size_map_min, 0.5);
-    declare_and_get_parameter<double>("common.cube_len", cube_len, 200);            // 地图的局部区域的长度（FastLio2论文中有解释）
-    declare_and_get_parameter<int>("common.max_iteration", NUM_MAX_ITERATIONS, 4);  // 卡尔曼滤波的最大迭代次数
+    declare_and_get_parameter<double>("common.cube_len", cube_len, 200);  // 地图的局部区域的长度（FastLio2论文中有解释）
+
+    declare_and_get_parameter<int>("kf.maximum_iter", kf.maximum_iter, 4);  // 卡尔曼滤波的最大迭代次数
+    declare_and_get_parameter<double>("kf.epsi", kf.epsi, 0.001);
+    declare_and_get_parameter<int>("kf.NUM_MATCH_POINTS", kf.NUM_MATCH_POINTS, 5);
+    declare_and_get_parameter<float>("kf.plane_thr", kf.plane_thr, 0.1);
+    declare_and_get_parameter<bool>("kf.extrinsic_est", kf.extrinsic_est, false);
 
     declare_and_get_parameter<float>("mapping.det_range", DET_RANGE, 300.f);    // 激光雷达的最大探测范围
     declare_and_get_parameter<double>("mapping.gyr_cov", gyr_cov, 0.1);         // IMU陀螺仪的协方差
@@ -35,6 +59,13 @@ void LaserMapping::readParameters() {
     declare_and_get_parameter<double>("pcd_save.filter_size_savemap", filter_size_savemap, 0.2);
     declare_and_get_parameter<string>("pcd_save.savemap_dir", savemap_dir, string(ROOT_DIR) + "PCD/");
     downSizeFilterSaveMap.setLeafSize(filter_size_savemap, filter_size_savemap, filter_size_savemap);
+
+    createDirectoryIfNotExists(savemap_dir);
+    fp = fopen((savemap_dir + "/pos_log.csv").c_str(), "w");
+    if (fp == nullptr) std::cerr << "Failed to open file for writing" << std::endl;
+    fout_traj.open(savemap_dir + "/traj_tum.txt", std::ios::out);
+    fout_traj.setf(std::ios::fixed, std::ios::floatfield);
+    fout_traj.precision(6);
 
     declare_and_get_parameter<vector<double>>("mapping.extrinsic_T", extrinT, vector<double>());  // 雷达相对于IMU的外参T（即雷达在IMU坐标系中的坐标）
     declare_and_get_parameter<vector<double>>("mapping.extrinsic_R", extrinR, vector<double>());  // 雷达相对于IMU的外参R
@@ -159,26 +190,40 @@ bool LaserMapping::sync_packages(MeasureGroup& meas) {
 }
 
 void LaserMapping::publish_frame_world(rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pubLaserCloudFull) {
-    int size = feats_undistort->points.size();
-    PointCloudXYZI::Ptr laserCloudWorld(new PointCloudXYZI(size, 1));
-    for (int i = 0; i < size; i++) pointBodyToWorld(&feats_undistort->points[i], &laserCloudWorld->points[i]);
+    PointCloudXYZI::Ptr laserCloudEffect(new PointCloudXYZI());
+    for (auto& i : kf.effect_idx) laserCloudEffect->points.push_back(feats_down_world->points[i]);
 
-    if (pcd_save_en == 1) {
+    if (pcd_save_en == 1 && scan_num % 5 == 0) {
         PointCloudXYZI tmpcloud;
-        downSizeFilterSaveMap.setInputCloud(laserCloudWorld);
+        downSizeFilterSaveMap.setInputCloud(feats_down_world);
         downSizeFilterSaveMap.filter(tmpcloud);
         *pcl_wait_save += tmpcloud;
-        if (scan_num % 100 == 0) {
-            downSizeFilterSaveMap.setInputCloud(pcl_wait_save);
-            downSizeFilterSaveMap.filter(*pcl_wait_save);
-        }
+
+        downSizeFilterSaveMap.setInputCloud(laserCloudEffect);
+        downSizeFilterSaveMap.filter(tmpcloud);
+        *pcl_effect_save += tmpcloud;
     }
 
-    if (dense_pub_en == false) laserCloudWorld = feats_down_world;
+    if (pcd_save_en == 1 && scan_num % 100 == 0) {
+        downSizeFilterSaveMap.setInputCloud(pcl_wait_save);
+        downSizeFilterSaveMap.filter(*pcl_wait_save);
+
+        downSizeFilterSaveMap.setInputCloud(pcl_effect_save);
+        downSizeFilterSaveMap.filter(*pcl_effect_save);
+    }
 
     if (scan_pub_en) {
+        *laserCloudEffect = *feats_down_world;
+        for (auto& pt : laserCloudEffect->points) pt.intensity = 0;
+        for (auto& i : kf.effect_idx) laserCloudEffect->points[i].intensity = 100;
         sensor_msgs::msg::PointCloud2 laserCloudmsg;
-        pcl::toROSMsg(*laserCloudWorld, laserCloudmsg);
+        pcl::toROSMsg(*laserCloudEffect, laserCloudmsg);
+        laserCloudmsg.header.stamp = get_ros_time(lidar_end_time);
+        laserCloudmsg.header.frame_id = "camera_init";
+        pubLaserCloudEffect->publish(laserCloudmsg);
+
+        // sensor_msgs::msg::PointCloud2 laserCloudmsg;
+        pcl::toROSMsg(*feats_down_world, laserCloudmsg);
         laserCloudmsg.header.stamp = get_ros_time(lidar_end_time);
         laserCloudmsg.header.frame_id = "camera_init";
         pubLaserCloudFull->publish(laserCloudmsg);
@@ -238,6 +283,32 @@ void LaserMapping::publish_path(rclcpp::Publisher<nav_msgs::msg::Path>::SharedPt
     }
 }
 
+void LaserMapping::dump_lio_state_to_log(FILE* fp) {
+    auto x_ = kf.get_x();
+    V3D rot_ang = x_.rot.matrix().eulerAngles(0, 1, 2);  // ZYX顺序
+
+    fprintf(fp, "%lf ,", Measures.lidar_beg_time - first_lidar_time);
+    fprintf(fp, "%lf ,%lf ,%lf ,", rot_ang(0), rot_ang(1), rot_ang(2));  // Angle
+    fprintf(fp, "%lf ,%lf ,%lf ,", x_.pos(0), x_.pos(1), x_.pos(2));     // Pos
+
+    // Debug
+    fprintf(fp, "%d ,%d ,", feats_down_size, (int)(kf.get_match_ratio() * 100));
+
+    fprintf(fp, "%lf ,%lf ,%lf ,", x_.vel(0), x_.vel(1), x_.vel(2));    // Vel
+    fprintf(fp, "%lf ,%lf ,%lf ,", x_.bg(0), x_.bg(1), x_.bg(2));       // Bias_g
+    fprintf(fp, "%lf ,%lf ,%lf ,", x_.ba(0), x_.ba(1), x_.ba(2));       // Bias_a
+    fprintf(fp, "%lf ,%lf ,%lf ", x_.grav(0), x_.grav(1), x_.grav(2));  // Bias_a
+    fprintf(fp, "\r\n");
+
+    fflush(fp);
+
+    auto quad = x_.rot.unit_quaternion();
+    fout_traj << Measures.lidar_beg_time << " " << x_.pos(0) << " " << x_.pos(1) << " " << x_.pos(2) << " " << quad.x() << " " << quad.y() << " " << quad.z()
+              << " " << quad.w() << std::endl;
+}
+
+#include <pcl/io/pcd_io.h>
+
 void LaserMapping::saveMap() { saveMap(savemap_dir); }
 void LaserMapping::saveMap(const std::string& path) {
     if (pcd_save_en == 1) {
@@ -250,8 +321,8 @@ void LaserMapping::saveMap(const std::string& path) {
             std::cerr << "Exception caught while filtering point cloud: " << e.what() << std::endl;
         }
 
-        std::string file_path = path + "scans.pcd";
-        std::cout << " pcd save to: " << file_path << std::endl;
-        pcl::io::savePCDFileBinary(file_path, *pcl_wait_save);
+        std::cout << " pcd save to: " << path << std::endl;
+        pcl::io::savePCDFileBinary(path + "scans.pcd", *pcl_wait_save);
+        pcl::io::savePCDFileBinary(path + "effect.pcd", *pcl_effect_save);
     }
 }

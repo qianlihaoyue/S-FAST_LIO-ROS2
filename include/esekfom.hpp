@@ -5,8 +5,6 @@
 
 // 该hpp主要包含：广义加减法，前向传播主函数，计算特征点残差及其雅可比，ESKF主函数
 
-const double epsi = 0.001;  // ESKF迭代时，如果dx<epsi 认为收敛
-
 namespace esekfom {
 
 struct dyn_share_datastruct {
@@ -21,10 +19,22 @@ public:
     typedef Eigen::Matrix<double, 24, 24> cov;              // 24X24的协方差矩阵
     typedef Eigen::Matrix<double, 24, 1> vectorized_state;  // 24X1的向量
 
-    PointCloudXYZI::Ptr normvec{new PointCloudXYZI(100000, 1)};  // 特征点在地图中对应的平面参数(平面的单位法向量,以及当前点到平面距离)
-    PointCloudXYZI::Ptr laserCloudOri{new PointCloudXYZI(100000, 1)};  // 有效特征点
-    PointCloudXYZI::Ptr corr_normvect{new PointCloudXYZI(100000, 1)};  // 有效特征点对应点法相量
-    bool point_selected_surf[100000] = {1};                            // 判断是否是有效特征点
+    PointCloudXYZI::Ptr normvec{new PointCloudXYZI()};  // 特征点在地图中对应的平面参数(平面的单位法向量,以及当前点到平面距离)
+    PointCloudXYZI::Ptr laserCloudOri{new PointCloudXYZI()};  // 有效特征点
+    PointCloudXYZI::Ptr corr_normvect{new PointCloudXYZI()};  // 有效特征点对应点法相量
+    std::vector<bool> point_selected_surf;                    // 判断是否是有效特征点
+    std::vector<int> effect_idx;
+
+    /////////////////////////// config
+    double epsi = 0.001;   // ESKF迭代时，如果dx<epsi 认为收敛
+    int maximum_iter = 3;  // 最大迭代次数
+
+    bool extrinsic_est = false;
+
+    int NUM_MATCH_POINTS = 5;  // 用多少个点拟合平面，一般取 5，提高该值，能提高拟合精度，提高定位稳定性，但耗时
+    float plane_thr = 0.1;     // the threshold for plane criteria, the smaller, the flatter a plane
+
+    ///////////////////////////
 
     esekf(){};
     ~esekf(){};
@@ -117,14 +127,15 @@ public:
         int feats_down_size = feats_down_body->points.size();
         laserCloudOri->clear();
         corr_normvect->clear();
+        laserCloudOri->resize(feats_down_size);
+        corr_normvect->resize(feats_down_size);
+        effect_idx.clear();
 
 #ifdef MP_EN
         omp_set_num_threads(MP_PROC_NUM);
 #pragma omp parallel for
 #endif
-
-        for (int i = 0; i < feats_down_size; i++)  // 遍历所有的特征点
-        {
+        for (int i = 0; i < feats_down_size; i++) {
             PointType& point_body = feats_down_body->points[i];
             PointType point_world;
 
@@ -139,25 +150,22 @@ public:
             vector<float> pointSearchSqDis(NUM_MATCH_POINTS);
             auto& points_near = Nearest_Points[i];  // Nearest_Points[i]打印出来发现是按照离point_world距离，从小到大的顺序的vector
 
-            double ta = omp_get_wtime();
+            // double ta = omp_get_wtime();
             if (ekfom_data.converge) {
                 // 寻找point_world的最近邻的平面点
                 ikdtree.Nearest_Search(point_world, NUM_MATCH_POINTS, points_near, pointSearchSqDis);
                 // 判断是否是有效匹配点，与loam系列类似，要求特征点最近邻的地图点数量>阈值，距离<阈值  满足条件的才置为true
-                point_selected_surf[i] = points_near.size() < NUM_MATCH_POINTS ? false : pointSearchSqDis[NUM_MATCH_POINTS - 1] > 5 ? false : true;
+                point_selected_surf[i] = (points_near.size() < NUM_MATCH_POINTS || pointSearchSqDis[NUM_MATCH_POINTS - 1] > 5) ? false : true;
             }
             if (!point_selected_surf[i]) continue;  // 如果该点不满足条件  不进行下面步骤
 
             Eigen::Matrix<float, 4, 1> pabcd;  // 平面点信息
             point_selected_surf[i] = false;    // 将该点设置为无效点，用来判断是否满足条件
             // 拟合平面方程ax+by+cz+d=0并求解点到平面距离
-            if (esti_plane(pabcd, points_near, 0.1f)) {
+            if (esti_plane(pabcd, points_near, plane_thr, NUM_MATCH_POINTS)) {
                 float pd2 = pabcd(0) * point_world.x + pabcd(1) * point_world.y + pabcd(2) * point_world.z + pabcd(3);  // 当前点到平面的距离
-                float s = 1 - 0.9 * fabs(pd2) /
-                                  sqrt(p_body.norm());  // 如果残差大于经验阈值，则认为该点是有效点  简言之，距离原点越近的lidar点  要求点到平面的距离越苛刻
-
-                if (s > 0.9)  // 如果残差大于阈值，则认为该点是有效点
-                {
+                // 如果残差大于经验阈值，则认为该点是有效点  简言之，距离原点越近的lidar点  要求点到平面的距离越苛刻
+                if (pd2 * pd2 < p_body.norm() / 81.0) {
                     point_selected_surf[i] = true;
                     normvec->points[i].x = pabcd(0);  // 存储平面的单位法向量  以及当前点到平面距离
                     normvec->points[i].y = pabcd(1);
@@ -169,10 +177,10 @@ public:
 
         int effct_feat_num = 0;  // 有效特征点的数量
         for (int i = 0; i < feats_down_size; i++) {
-            if (point_selected_surf[i])  // 对于满足要求的点
-            {
+            if (point_selected_surf[i]) {
                 laserCloudOri->points[effct_feat_num] = feats_down_body->points[i];  // 把这些点重新存到laserCloudOri中
                 corr_normvect->points[effct_feat_num] = normvec->points[i];          // 存储这些点对应的法向量和到平面的距离
+                effect_idx.push_back(i);
                 effct_feat_num++;
             }
         }
@@ -234,9 +242,10 @@ public:
     }
 
     // ESKF
-    void update_iterated_dyn_share_modified(double R, PointCloudXYZI::Ptr& feats_down_body, KD_TREE<PointType>& ikdtree, vector<PointVector>& Nearest_Points,
-                                            int maximum_iter, bool extrinsic_est) {
+    void update_iterated_dyn_share_modified(double R, PointCloudXYZI::Ptr& feats_down_body, KD_TREE<PointType>& ikdtree, vector<PointVector>& Nearest_Points) {
         normvec->resize(int(feats_down_body->points.size()));
+        point_selected_surf.resize(int(feats_down_body->points.size()));
+        std::fill(point_selected_surf.begin(), point_selected_surf.end(), false);
 
         dyn_share_datastruct dyn_share;
         dyn_share.valid = true;
@@ -247,15 +256,13 @@ public:
 
         vectorized_state dx_new = vectorized_state::Zero();  // 24X1的向量
 
-        for (int i = -1; i < maximum_iter; i++)  // maximum_iter是卡尔曼滤波的最大迭代次数
-        {
+        // maximum_iter: kalman最大迭代次数
+        for (int i = -1; i < maximum_iter; i++) {
             dyn_share.valid = true;
             // 计算雅克比，也就是点面残差的导数 H(代码里是h_x)
             h_share_model(dyn_share, feats_down_body, ikdtree, Nearest_Points, extrinsic_est);
 
-            if (!dyn_share.valid) {
-                continue;
-            }
+            if (!dyn_share.valid) continue;
 
             vectorized_state dx;
             dx_new = boxminus(x_, x_propagated);  // 公式(18)中的 x^k - x^
@@ -270,15 +277,14 @@ public:
             K = K_front.block<24, 12>(0, 0) * H.transpose() / R;  // 卡尔曼增益  这里R视为常数
 
             Eigen::Matrix<double, 24, 24> KH = Eigen::Matrix<double, 24, 24>::Zero();  // 矩阵 K * H
-            KH.block<24, 12>(0, 0) = K * H;
+            KH.block<24, 12>(0, 0) = K * H;                                            // K:24 x effectnum  H: effectnum x 12
             Eigen::Matrix<double, 24, 1> dx_ = K * dyn_share.h + (KH - Eigen::Matrix<double, 24, 24>::Identity()) * dx_new;  // 公式(18)
             // std::cout << "dx_: " << dx_.transpose() << std::endl;
             x_ = boxplus(x_, dx_);  // 公式(18)
 
             dyn_share.converge = true;
             for (int j = 0; j < 24; j++) {
-                if (std::fabs(dx_[j]) > epsi)  // 如果dx>epsi 认为没有收敛
-                {
+                if (std::fabs(dx_[j]) > epsi) {  // 如果dx>epsi 认为没有收敛
                     dyn_share.converge = false;
                     break;
                 }
@@ -291,7 +297,9 @@ public:
                 dyn_share.converge = true;
             }
 
-            if (t > 1 || i == maximum_iter - 1) {
+            // TODO:t>1改成t>0，对性能有较大提升
+            // 原始代码，收敛后仍然会进行两次
+            if (t > 0 || i == maximum_iter - 1) {
                 P_ = (Eigen::Matrix<double, 24, 24>::Identity() - KH) * P_;  // 公式(19)
                 return;
             }

@@ -9,6 +9,7 @@
 - 2.1 - 5.31 - fix sophus path
 - 2.2 - 6.3 - 封装 & 测试
 
+- 2.3 - 6.23 - 引出kf参数，添加log输出
 
 
 ## Simplified Implementation of FAST_LIO

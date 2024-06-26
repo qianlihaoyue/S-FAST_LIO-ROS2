@@ -12,7 +12,7 @@
 
 // #define PI_M (3.14159265358)
 #define G_m_s2 (9.81)  // Gravaty const in GuangDong/China
-#define NUM_MATCH_POINTS (5)
+// #define NUM_MATCH_POINTS (10)  // 5
 
 #define VEC_FROM_ARRAY(v) v[0], v[1], v[2]
 #define MAT_FROM_ARRAY(v) v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7], v[8]
@@ -66,9 +66,13 @@ inline float calc_dist(PointType p1, PointType p2) {
 }
 
 template <typename T>
-bool esti_plane(Eigen::Matrix<T, 4, 1>& pca_result, const PointVector& point, const T& threshold) {
-    Eigen::Matrix<T, NUM_MATCH_POINTS, 3> A;
-    Eigen::Matrix<T, NUM_MATCH_POINTS, 1> b;
+bool esti_plane(Eigen::Matrix<T, 4, 1>& pca_result, const PointVector& point, const T& threshold, int NUM_MATCH_POINTS) {
+    // Eigen::Matrix<T, NUM_MATCH_POINTS, 3> A;
+    // Eigen::Matrix<T, NUM_MATCH_POINTS, 1> b;
+    // 使用动态大小的矩阵
+    Eigen::Matrix<T, Eigen::Dynamic, 3> A(NUM_MATCH_POINTS, 3);
+    Eigen::Matrix<T, Eigen::Dynamic, 1> b(NUM_MATCH_POINTS);
+
     A.setZero();
     b.setOnes();
     b *= -1.0f;

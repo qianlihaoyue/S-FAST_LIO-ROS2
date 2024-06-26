@@ -35,7 +35,10 @@ public:
 
     /*** Time Log Variables ***/
     int add_point_size = 0, kdtree_delete_counter = 0;
-    bool time_sync_en = false, extrinsic_est_en = true, path_en = true, runtime_pos_log = false;
+    bool time_sync_en = false, extrinsic_est_en = false, path_en = true, runtime_pos_log = false;
+    FILE* fp;
+    void dump_lio_state_to_log(FILE* fp);
+    std::ofstream fout_traj;
     /**************************/
 
     float DET_RANGE = 300.0f;
@@ -49,7 +52,7 @@ public:
     double last_timestamp_lidar = 0, last_timestamp_imu = -1.0;
     double gyr_cov = 0.1, acc_cov = 0.1, b_gyr_cov = 0.0001, b_acc_cov = 0.0001;
     double cube_len = 0, lidar_end_time = 0, first_lidar_time = 0.0;
-    int feats_down_size = 0, NUM_MAX_ITERATIONS = 0;
+    int feats_down_size = 0;
 
     bool lidar_pushed, flg_first_scan = true, flg_EKF_inited;
     bool scan_pub_en = false, dense_pub_en = false;
@@ -80,12 +83,13 @@ public:
     pcl::VoxelGrid<PointType> downSizeFilterSaveMap;
     std::string savemap_dir;
     PointCloudXYZI::Ptr pcl_wait_save{new PointCloudXYZI()};
+    PointCloudXYZI::Ptr pcl_effect_save{new PointCloudXYZI()};
     void saveMap();
     void saveMap(const std::string& path);
 
     double filter_size_surf_min = 0, filter_size_map_min = 0;
     pcl::VoxelGrid<PointType> downSizeFilterSurf;
-    pcl::VoxelGrid<PointType> downSizeFilterMap;
+    // pcl::VoxelGrid<PointType> downSizeFilterMap;
 
     KD_TREE<PointType> ikdtree;
 
