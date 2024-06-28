@@ -11,6 +11,9 @@
 
 - 2.3 - 6.23 - 引出kf参数，添加log输出
 
+- branch - degen
+- b1.0 - 6.28 - 添加点线约束
+
 
 ## Simplified Implementation of FAST_LIO
 

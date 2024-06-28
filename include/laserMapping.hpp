@@ -91,7 +91,7 @@ public:
     pcl::VoxelGrid<PointType> downSizeFilterSurf;
     // pcl::VoxelGrid<PointType> downSizeFilterMap;
 
-    KD_TREE<PointType> ikdtree;
+    KD_TREE<PointType> ikdtree,ikdtree_de;
 
     V3D Lidar_T_wrt_IMU{Zero3d};
     M3D Lidar_R_wrt_IMU{Eye3d};

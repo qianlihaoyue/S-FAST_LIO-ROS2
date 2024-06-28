@@ -102,6 +102,62 @@ bool esti_plane(Eigen::Matrix<T, 4, 1>& pca_result, const PointVector& point, co
     return true;
 }
 
+#include <Eigen/Dense>
+
+template <typename T>
+bool esti_line(Eigen::Matrix<T, 6, 1>& line_result, const PointVector& points, const T& threshold, int NUM_MATCH_POINTS) {
+    // 使用动态大小的矩阵
+    Eigen::Matrix<T, Eigen::Dynamic, 3> A(NUM_MATCH_POINTS, 3);
+    Eigen::Matrix<T, Eigen::Dynamic, 1> b(NUM_MATCH_POINTS);
+
+    A.setZero();
+    b.setZero();
+
+    // 将点的坐标填入A矩阵
+    for (int i = 0; i < NUM_MATCH_POINTS; ++i) {
+        A(i, 0) = points[i].x;
+        A(i, 1) = points[i].y;
+        A(i, 2) = points[i].z;
+    }
+
+    // 计算中心点
+    Eigen::Matrix<T, 3, 1> centroid = A.colwise().mean();
+
+    // 将点减去中心点
+    for (int i = 0; i < NUM_MATCH_POINTS; ++i) {
+        A(i, 0) -= centroid(0);
+        A(i, 1) -= centroid(1);
+        A(i, 2) -= centroid(2);
+    }
+
+    // 计算协方差矩阵
+    Eigen::Matrix<T, 3, 3> covariance = A.transpose() * A;
+
+    // 计算特征值和特征向量
+    Eigen::SelfAdjointEigenSolver<Eigen::Matrix<T, 3, 3>> eigen_solver(covariance);
+    Eigen::Matrix<T, 3, 1> eigen_values = eigen_solver.eigenvalues();
+    Eigen::Matrix<T, 3, 3> eigen_vectors = eigen_solver.eigenvectors();
+
+    // 直线方向为最大特征值对应的特征向量
+    Eigen::Matrix<T, 3, 1> direction = eigen_vectors.col(2);
+
+    // 结果为方向向量和中心点
+    line_result.template head<3>() = direction;
+    line_result.template tail<3>() = centroid;
+
+    // 检查点与拟合直线的距离是否超过阈值
+    for (int i = 0; i < NUM_MATCH_POINTS; ++i) {
+        Eigen::Matrix<T, 3, 1> point(points[i].x, points[i].y, points[i].z);
+        Eigen::Matrix<T, 3, 1> projected_point = centroid + direction * ((point - centroid).dot(direction));
+        T distance = (point - projected_point).norm();
+        if (distance > threshold) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 inline double get_time_sec(const builtin_interfaces::msg::Time& time) { return rclcpp::Time(time).seconds(); }
 
 inline rclcpp::Time get_ros_time(double timestamp) {

@@ -220,7 +220,7 @@ void LaserMapping::publish_frame_world(rclcpp::Publisher<sensor_msgs::msg::Point
         pcl::toROSMsg(*laserCloudEffect, laserCloudmsg);
         laserCloudmsg.header.stamp = get_ros_time(lidar_end_time);
         laserCloudmsg.header.frame_id = "camera_init";
-        pubLaserCloudEffect->publish(laserCloudmsg);
+        // pubLaserCloudEffect->publish(laserCloudmsg);
 
         // sensor_msgs::msg::PointCloud2 laserCloudmsg;
         pcl::toROSMsg(*feats_down_world, laserCloudmsg);

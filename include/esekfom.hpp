@@ -1,5 +1,9 @@
 #pragma once
 
+#include "common_lib.h"
+#include <cmath>
+#include <pcl/filters/voxel_grid.h>
+#include <pcl/kdtree/kdtree_flann.h>
 #include "ikd-Tree/ikd_Tree.h"
 #include "use-ikfom.hpp"
 
@@ -22,7 +26,7 @@ public:
     PointCloudXYZI::Ptr normvec{new PointCloudXYZI()};  // 特征点在地图中对应的平面参数(平面的单位法向量,以及当前点到平面距离)
     PointCloudXYZI::Ptr laserCloudOri{new PointCloudXYZI()};  // 有效特征点
     PointCloudXYZI::Ptr corr_normvect{new PointCloudXYZI()};  // 有效特征点对应点法相量
-    std::vector<bool> point_selected_surf;                    // 判断是否是有效特征点
+    std::vector<int> point_selected_surf;                     // 判断是否是有效特征点
     std::vector<int> effect_idx;
 
     /////////////////////////// config
@@ -36,7 +40,29 @@ public:
 
     ///////////////////////////
 
-    esekf(){};
+    pcl::VoxelGrid<PointType> downSizeFilter;
+    PointCloudXYZI::Ptr cloudKeyPoses3D{new PointCloudXYZI};
+    std::vector<Eigen::Matrix<float, 6, 1>> prior_line;
+    pcl::KdTreeFLANN<PointType>::Ptr priorTree{new pcl::KdTreeFLANN<PointType>};
+
+    esekf() {
+        for (int i = 0; i < 10; i++) {
+            Eigen::Matrix<float, 6, 1> line;
+            line << 0, 0, 1, i * 4, 1.9, 2;
+            prior_line.emplace_back(line);
+            line << 0, 0, 1, i * 4, -1.9, 2;
+            prior_line.emplace_back(line);
+
+            PointType pt;
+            pt.x = i * 4, pt.y = 1.9, pt.z = 2, pt.intensity = i * 2;
+            cloudKeyPoses3D->emplace_back(pt);
+            pt.x = i * 4, pt.y = -1.9, pt.z = 2, pt.intensity = i * 2 + 1;
+            cloudKeyPoses3D->emplace_back(pt);
+        }
+
+        priorTree->setInputCloud(cloudKeyPoses3D);
+        downSizeFilter.setLeafSize(0.1, 0.1, 0.1);
+    };
     ~esekf(){};
 
     state_ikfom get_x() { return x_; }
@@ -122,8 +148,8 @@ public:
     double get_match_ratio() { return ratio_all; }
 
     // 计算每个特征点的残差及H矩阵
-    void h_share_model(dyn_share_datastruct& ekfom_data, PointCloudXYZI::Ptr& feats_down_body, KD_TREE<PointType>& ikdtree, vector<PointVector>& Nearest_Points,
-                       bool extrinsic_est) {
+    void h_share_model(dyn_share_datastruct& ekfom_data, PointCloudXYZI::Ptr& feats_down_body, KD_TREE<PointType>& ikdtree, KD_TREE<PointType>& ikdtree_de,
+                       vector<PointVector>& Nearest_Points, bool extrinsic_est) {
         int feats_down_size = feats_down_body->points.size();
         laserCloudOri->clear();
         corr_normvect->clear();
@@ -150,28 +176,68 @@ public:
             vector<float> pointSearchSqDis(NUM_MATCH_POINTS);
             auto& points_near = Nearest_Points[i];  // Nearest_Points[i]打印出来发现是按照离point_world距离，从小到大的顺序的vector
 
+            bool pt_line = (point_body.intensity > 100);
+
+            std::vector<int> pointIdx;
+            std::vector<float> pointDist;
+
             // double ta = omp_get_wtime();
             if (ekfom_data.converge) {
                 // 寻找point_world的最近邻的平面点
-                ikdtree.Nearest_Search(point_world, NUM_MATCH_POINTS, points_near, pointSearchSqDis);
+                if (pt_line) {
+                    PointCloudXYZI::Ptr nnpoint(new PointCloudXYZI), res(new PointCloudXYZI);
+                    ikdtree_de.Nearest_Search(point_world, 30, nnpoint->points, pointSearchSqDis);
+                    downSizeFilter.setInputCloud(nnpoint);
+                    downSizeFilter.filter(*res);
+                    points_near = res->points;
+
+                    // priorTree->nearestKSearch(point_world, 1, pointIdx, pointDist);
+                    // points_near.clear();
+                    // points_near.push_back(cloudKeyPoses3D->points[pointIdx[0]]);
+                } else
+                    ikdtree.Nearest_Search(point_world, NUM_MATCH_POINTS, points_near, pointSearchSqDis);
                 // 判断是否是有效匹配点，与loam系列类似，要求特征点最近邻的地图点数量>阈值，距离<阈值  满足条件的才置为true
-                point_selected_surf[i] = (points_near.size() < NUM_MATCH_POINTS || pointSearchSqDis[NUM_MATCH_POINTS - 1] > 5) ? false : true;
+                point_selected_surf[i] = (points_near.size() < NUM_MATCH_POINTS || pointSearchSqDis[NUM_MATCH_POINTS - 1] > 5) ? 0 : pt_line + 1;
             }
             if (!point_selected_surf[i]) continue;  // 如果该点不满足条件  不进行下面步骤
 
-            Eigen::Matrix<float, 4, 1> pabcd;  // 平面点信息
-            point_selected_surf[i] = false;    // 将该点设置为无效点，用来判断是否满足条件
-            // 拟合平面方程ax+by+cz+d=0并求解点到平面距离
-            if (esti_plane(pabcd, points_near, plane_thr, NUM_MATCH_POINTS)) {
-                float pd2 = pabcd(0) * point_world.x + pabcd(1) * point_world.y + pabcd(2) * point_world.z + pabcd(3);  // 当前点到平面的距离
-                // 如果残差大于经验阈值，则认为该点是有效点  简言之，距离原点越近的lidar点  要求点到平面的距离越苛刻
-                if (pd2 * pd2 < p_body.norm() / 81.0) {
-                    point_selected_surf[i] = true;
-                    normvec->points[i].x = pabcd(0);  // 存储平面的单位法向量  以及当前点到平面距离
-                    normvec->points[i].y = pabcd(1);
-                    normvec->points[i].z = pabcd(2);
+            if (point_selected_surf[i] == 1) {
+                Eigen::Matrix<float, 4, 1> pabcd;  // 平面点信息
+                // point_selected_surf[i] = false;    // 将该点设置为无效点，用来判断是否满足条件
+                // 拟合平面方程ax+by+cz+d=0并求解点到平面距离
+                if (esti_plane(pabcd, points_near, plane_thr, NUM_MATCH_POINTS)) {
+                    float pd2 = pabcd(0) * point_world.x + pabcd(1) * point_world.y + pabcd(2) * point_world.z + pabcd(3);  // 当前点到平面的距离
+                    // 如果残差大于经验阈值，则认为该点是有效点  简言之，距离原点越近的lidar点  要求点到平面的距离越苛刻
+                    if (pd2 * pd2 < p_body.norm() / 81.0) {
+                        point_selected_surf[i] = 1;
+                        normvec->points[i].x = pabcd(0);  // 存储平面的单位法向量  以及当前点到平面距离
+                        normvec->points[i].y = pabcd(1);
+                        normvec->points[i].z = pabcd(2);
+                        normvec->points[i].intensity = pd2;
+                    } else
+                        point_selected_surf[i] = 0;
+                } else
+                    point_selected_surf[i] = 0;
+            } else {
+                Eigen::Matrix<float, 6, 1> pabcd;
+                // Eigen::Matrix<float, 6, 1> pabcd = prior_line[points_near[0].intensity];
+                if (esti_line(pabcd, points_near, plane_thr, points_near.size())) {
+                    V3D dir = pabcd.template head<3>().normalized().cast<double>();
+                    V3D centroid = pabcd.template tail<3>().cast<double>();
+                    V3D pab = (p_global - centroid).cross(dir);
+                    float pd2 = pab.norm();
+
+                    point_selected_surf[i] = 2;
+                    // normvec->points[i].x = (-pab(1) * dir(2) + pab(2) * dir(1)) / pd2;
+                    // normvec->points[i].y = (pab(0) * dir(2) - pab(2) * dir(0)) / pd2;
+                    // normvec->points[i].z = (-pab(0) * dir(1) + pab(1) * dir(0)) / pd2;
+                    normvec->points[i].x = (-pab(1) * dir(2)) / pd2;
+                    normvec->points[i].y = (pab(0) * dir(2)) / pd2;
+                    normvec->points[i].z = 0;
                     normvec->points[i].intensity = pd2;
-                }
+
+                } else
+                    point_selected_surf[i] = 0;
             }
         }
 
@@ -242,7 +308,8 @@ public:
     }
 
     // ESKF
-    void update_iterated_dyn_share_modified(double R, PointCloudXYZI::Ptr& feats_down_body, KD_TREE<PointType>& ikdtree, vector<PointVector>& Nearest_Points) {
+    void update_iterated_dyn_share_modified(double R, PointCloudXYZI::Ptr& feats_down_body, KD_TREE<PointType>& ikdtree, KD_TREE<PointType>& ikdtree_de,
+                                            vector<PointVector>& Nearest_Points) {
         normvec->resize(int(feats_down_body->points.size()));
         point_selected_surf.resize(int(feats_down_body->points.size()));
         std::fill(point_selected_surf.begin(), point_selected_surf.end(), false);
@@ -260,7 +327,7 @@ public:
         for (int i = -1; i < maximum_iter; i++) {
             dyn_share.valid = true;
             // 计算雅克比，也就是点面残差的导数 H(代码里是h_x)
-            h_share_model(dyn_share, feats_down_body, ikdtree, Nearest_Points, extrinsic_est);
+            h_share_model(dyn_share, feats_down_body, ikdtree, ikdtree_de, Nearest_Points, extrinsic_est);
 
             if (!dyn_share.valid) continue;
 
