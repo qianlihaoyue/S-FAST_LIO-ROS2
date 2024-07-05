@@ -40,16 +40,7 @@ void LaserMapping::initLoc() {
         string all_points_dir(loadmap_dir + "scans.pcd");
         if (pcl::io::loadPCDFile<PointType>(all_points_dir, *prior_cloud) == -1) std::cerr << "Read file fail! " << all_points_dir << std::endl;
         ikdtree.set_downsample_param(filter_size_map_min);
-        ikdtree_de.set_downsample_param(filter_size_map_min);
-        PointVector cloud_norm, cloud_de;
-        for (auto& pt : prior_cloud->points) {
-            if (pt.intensity > 100)
-                cloud_de.emplace_back(pt);
-            else
-                cloud_norm.emplace_back(pt);
-        }
-        ikdtree.Build(cloud_norm);
-        ikdtree_de.Build(cloud_de);
+        ikdtree.Build(prior_cloud->points);
         std::cout << "---- ikdtree size: " << ikdtree.size() << std::endl;
 
         if (scan_pub_en) {
@@ -127,10 +118,7 @@ void LaserMapping::lasermap_fov_segment() {
 
     PointVector points_history;
     ikdtree.acquire_removed_points(points_history);
-    ikdtree_de.acquire_removed_points(points_history);
-
     if (cub_needrm.size() > 0) kdtree_delete_counter = ikdtree.Delete_Point_Boxes(cub_needrm);  // 删除指定范围内的点
-    if (cub_needrm.size() > 0) kdtree_delete_counter = ikdtree_de.Delete_Point_Boxes(cub_needrm);
 }
 
 // 根据最新估计位姿  增量添加点云到map
@@ -172,23 +160,9 @@ void LaserMapping::map_incremental() {
     }
 
     double st_time = omp_get_wtime();
-
-    PointToAdd.insert(PointToAdd.end(), PointNoNeedDownsample.begin(), PointNoNeedDownsample.end());
-
-    PointVector cloud_norm, cloud_de;
-    for (auto& pt : PointToAdd) {
-        if (pt.intensity > 100)
-            cloud_de.emplace_back(pt);
-        else
-            cloud_norm.emplace_back(pt);
-    }
-
-    ikdtree.Add_Points(cloud_norm, true);
-    ikdtree_de.Add_Points(cloud_de, false);
-
-    // add_point_size = ikdtree.Add_Points(PointToAdd, true);
-    // ikdtree.Add_Points(PointNoNeedDownsample, false);
-    // add_point_size = PointToAdd.size() + PointNoNeedDownsample.size();
+    add_point_size = ikdtree.Add_Points(PointToAdd, true);
+    ikdtree.Add_Points(PointNoNeedDownsample, false);
+    add_point_size = PointToAdd.size() + PointNoNeedDownsample.size();
 }
 
 void LaserMapping::timer_callback() {
@@ -210,6 +184,7 @@ void LaserMapping::timer_callback() {
         }
 
         state_point = kf.get_x();
+        // std::cout << "irot" << state_point.rot << std::endl;
         pos_lid = state_point.pos + state_point.rot.matrix() * state_point.offset_T_L_I;
 
         flg_EKF_inited = (Measures.lidar_beg_time - first_lidar_time) < INIT_TIME ? false : true;
@@ -227,7 +202,6 @@ void LaserMapping::timer_callback() {
         *feats_undistort = std::move(*cloud_norm);
         downSizeFilterSurf.setInputCloud(feats_undistort);
         downSizeFilterSurf.filter(*feats_down_body);
-        *feats_down_body += *cloud_de;
         feats_down_size = feats_down_body->points.size();
         feats_down_world->resize(feats_down_size);
 
@@ -239,28 +213,21 @@ void LaserMapping::timer_callback() {
         // 初始化ikdtree(ikdtree为空时)
         if (loc_mode == false && ikdtree.Root_Node == nullptr) {
             ikdtree.set_downsample_param(filter_size_map_min);
-            ikdtree_de.set_downsample_param(filter_size_map_min);
             for (int i = 0; i < feats_down_size; i++) pointBodyToWorld(&(feats_down_body->points[i]), &(feats_down_world->points[i]));
-
-            PointVector de, norm;
-            for (auto& pt : feats_down_world->points) {
-                if (pt.intensity > 100)
-                    de.push_back(pt);
-                else
-                    norm.push_back(pt);
-            }
-            ikdtree.Build(norm);   // 根据世界坐标系下的点构建ikdtree
-            ikdtree_de.Build(de);  // 此时是局部坐标系
+            ikdtree.Build(feats_down_world->points);  // 根据世界坐标系下的点构建ikdtree
             return;
         }
 
         double t1 = omp_get_wtime();
         /*** iterated state estimation ***/
-        Nearest_Points.resize(feats_down_size);  // 存储近邻点的vector
-        kf.update_iterated_dyn_share_modified(LASER_POINT_COV, feats_down_body, ikdtree, ikdtree_de, Nearest_Points);
+        PointCloudXYZI::Ptr cloud_ekf(new PointCloudXYZI);
+        *cloud_ekf += *feats_down_body;
+        *cloud_ekf += *cloud_de;
+        kf.update_iterated_dyn_share_modified(LASER_POINT_COV, cloud_ekf, ikdtree, Nearest_Points);
         double t2 = omp_get_wtime();
 
         state_point = kf.get_x();
+        // std::cout << "lrot" << state_point.rot << std::endl;
         pos_lid = state_point.pos + state_point.rot.matrix() * state_point.offset_T_L_I;
 
         /******* Publish odometry *******/
@@ -272,6 +239,9 @@ void LaserMapping::timer_callback() {
 
         /******* Publish points *******/
         if (path_en) publish_path(pubPath);
+        PointCloudXYZI::Ptr cloud_dew(new PointCloudXYZI(1, cloud_de->size()));
+        for (int i = 0; i < cloud_de->size(); i++) pointBodyToWorld(&(cloud_de->points[i]), &(cloud_dew->points[i]));
+        *feats_down_world += *cloud_dew;
         if (scan_pub_en || pcd_save_en) publish_frame_world(pubLaserCloudFull);
 
         sensor_msgs::msg::PointCloud2 laserCloudmsg;
@@ -283,8 +253,7 @@ void LaserMapping::timer_callback() {
         double t3 = omp_get_wtime();
 
         if (runtime_pos_log) {
-            printf("norm: %d de: %d match: %d%% ", feats_down_size - (int)cloud_de->points.size(), (int)cloud_de->points.size(),
-                   (int)(kf.get_match_ratio() * 100));
+            printf("norm: %d de: %d match: %d%% ", feats_down_size, (int)cloud_de->points.size(), (int)(kf.get_match_ratio() * 100));
             printf("[tim] ICP: %0.2f total: %0.2f", (t2 - t1) * 1000.0, (t3 - t0) * 1000.0);
             std::cout << std::endl;
             if (fp) dump_lio_state_to_log(fp);

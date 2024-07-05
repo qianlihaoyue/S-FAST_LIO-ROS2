@@ -13,6 +13,7 @@
 
 - branch - degen
 - b1.0 - 6.28 - 添加点线约束
+- b1.1 - 7.5 - 改为点点约束（先验点），只约束xy，并且第一帧不使用点点约束
 
 
 ## Simplified Implementation of FAST_LIO

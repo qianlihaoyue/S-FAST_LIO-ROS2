@@ -191,7 +191,7 @@ bool LaserMapping::sync_packages(MeasureGroup& meas) {
 
 void LaserMapping::publish_frame_world(rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pubLaserCloudFull) {
     PointCloudXYZI::Ptr laserCloudEffect(new PointCloudXYZI());
-    for (auto& i : kf.effect_idx) laserCloudEffect->points.push_back(feats_down_world->points[i]);
+    // for (auto& i : kf.effect_idx) laserCloudEffect->points.push_back(feats_down_world->points[i]);
 
     if (pcd_save_en == 1 && scan_num % 5 == 0) {
         PointCloudXYZI tmpcloud;
@@ -199,9 +199,9 @@ void LaserMapping::publish_frame_world(rclcpp::Publisher<sensor_msgs::msg::Point
         downSizeFilterSaveMap.filter(tmpcloud);
         *pcl_wait_save += tmpcloud;
 
-        downSizeFilterSaveMap.setInputCloud(laserCloudEffect);
-        downSizeFilterSaveMap.filter(tmpcloud);
-        *pcl_effect_save += tmpcloud;
+        // downSizeFilterSaveMap.setInputCloud(laserCloudEffect);
+        // downSizeFilterSaveMap.filter(tmpcloud);
+        // *pcl_effect_save += tmpcloud;
     }
 
     if (pcd_save_en == 1 && scan_num % 100 == 0) {
@@ -215,11 +215,11 @@ void LaserMapping::publish_frame_world(rclcpp::Publisher<sensor_msgs::msg::Point
     if (scan_pub_en) {
         *laserCloudEffect = *feats_down_world;
         for (auto& pt : laserCloudEffect->points) pt.intensity = 0;
-        for (auto& i : kf.effect_idx) laserCloudEffect->points[i].intensity = 100;
+        // for (auto& i : kf.effect_idx) laserCloudEffect->points[i].intensity = 100;
         sensor_msgs::msg::PointCloud2 laserCloudmsg;
-        pcl::toROSMsg(*laserCloudEffect, laserCloudmsg);
-        laserCloudmsg.header.stamp = get_ros_time(lidar_end_time);
-        laserCloudmsg.header.frame_id = "camera_init";
+        // pcl::toROSMsg(*laserCloudEffect, laserCloudmsg);
+        // laserCloudmsg.header.stamp = get_ros_time(lidar_end_time);
+        // laserCloudmsg.header.frame_id = "camera_init";
         // pubLaserCloudEffect->publish(laserCloudmsg);
 
         // sensor_msgs::msg::PointCloud2 laserCloudmsg;
@@ -297,7 +297,7 @@ void LaserMapping::dump_lio_state_to_log(FILE* fp) {
     fprintf(fp, "%lf ,%lf ,%lf ,", x_.vel(0), x_.vel(1), x_.vel(2));    // Vel
     fprintf(fp, "%lf ,%lf ,%lf ,", x_.bg(0), x_.bg(1), x_.bg(2));       // Bias_g
     fprintf(fp, "%lf ,%lf ,%lf ,", x_.ba(0), x_.ba(1), x_.ba(2));       // Bias_a
-    fprintf(fp, "%lf ,%lf ,%lf ", x_.grav(0), x_.grav(1), x_.grav(2));  // Bias_a
+    fprintf(fp, "%lf ,%lf ,%lf ", x_.grav(0), x_.grav(1), x_.grav(2));  // 
     fprintf(fp, "\r\n");
 
     fflush(fp);
