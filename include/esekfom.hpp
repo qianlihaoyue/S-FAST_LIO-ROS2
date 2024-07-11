@@ -2,6 +2,7 @@
 
 #include "ikd-Tree/ikd_Tree.h"
 #include "use-ikfom.hpp"
+#include <Eigen/Dense>
 
 // 该hpp主要包含：广义加减法，前向传播主函数，计算特征点残差及其雅可比，ESKF主函数
 
@@ -120,6 +121,8 @@ public:
     double ratio_all = 0.;
     void get_match_ratio(double& all) { all = ratio_all; }
     double get_match_ratio() { return ratio_all; }
+    
+    Eigen::Matrix3d covariance_matrix;
 
     // 计算每个特征点的残差及H矩阵
     void h_share_model(dyn_share_datastruct& ekfom_data, PointCloudXYZI::Ptr& feats_down_body, KD_TREE<PointType>& ikdtree, vector<PointVector>& Nearest_Points,
@@ -196,6 +199,8 @@ public:
         ekfom_data.h_x = Eigen::MatrixXd::Zero(effct_feat_num, 12);
         ekfom_data.h.resize(effct_feat_num);
 
+        Eigen::Matrix3Xd vectors = Eigen::Matrix3Xd::Zero(3, effct_feat_num);
+
         for (int i = 0; i < effct_feat_num; i++) {
             V3D point_(laserCloudOri->points[i].x, laserCloudOri->points[i].y, laserCloudOri->points[i].z);
             M3D point_crossmat;
@@ -207,6 +212,9 @@ public:
             // 得到对应的平面的法向量
             const PointType& norm_p = corr_normvect->points[i];
             V3D norm_vec(norm_p.x, norm_p.y, norm_p.z);
+
+            // 添加法向量
+            vectors.col(i) = norm_vec;
 
             // 计算雅可比矩阵H
             V3D C(x_.rot.matrix().transpose() * norm_vec);
@@ -221,6 +229,10 @@ public:
             // 残差：点面距离
             ekfom_data.h(i) = -norm_p.intensity;
         }
+
+        // 计算协方差
+        Eigen::MatrixXd centered = vectors.colwise() - vectors.rowwise().mean();
+        covariance_matrix = (centered * centered.transpose());
     }
 
     // 广义减法

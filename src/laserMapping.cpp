@@ -19,6 +19,7 @@ void LaserMapping::initLIO() {
     path.header.stamp = this->get_clock()->now();
     path.header.frame_id = "camera_init";
 
+    marker_pub_ = this->create_publisher<visualization_msgs::msg::Marker>("pca_marker", 10);
     tf_broadcaster = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
     timer_ = rclcpp::create_timer(this, this->get_clock(), std::chrono::milliseconds(10), std::bind(&LaserMapping::timer_callback, this));
 
@@ -229,6 +230,7 @@ void LaserMapping::timer_callback() {
         /******* Publish points *******/
         if (path_en) publish_path(pubPath);
         if (scan_pub_en || pcd_save_en) publish_frame_world(pubLaserCloudFull);
+        publish_pca(kf.covariance_matrix);
 
         double t3 = omp_get_wtime();
 

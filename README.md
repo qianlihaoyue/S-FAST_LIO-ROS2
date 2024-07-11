@@ -10,6 +10,7 @@
 - 2.2 - 6.3 - 封装 & 测试
 
 - 2.3 - 6.23 - 引出kf参数，添加log输出
+- 2.4 - 7.11 - 添加PCA法向分析
 
 
 ## Simplified Implementation of FAST_LIO

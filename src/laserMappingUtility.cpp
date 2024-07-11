@@ -283,6 +283,56 @@ void LaserMapping::publish_path(rclcpp::Publisher<nav_msgs::msg::Path>::SharedPt
     }
 }
 
+
+void LaserMapping::publish_pca(const Eigen::Matrix3d& covariance_matrix) {
+    Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> eigensolver(covariance_matrix);
+    Eigen::Vector3d eigenvalues = eigensolver.eigenvalues();
+    Eigen::Matrix3d eigenvectors = eigensolver.eigenvectors();
+
+    visualization_msgs::msg::Marker marker;
+    marker.header.frame_id = "camera_init";
+    marker.header.stamp = get_ros_time(lidar_end_time);
+    marker.ns = "pca";
+    marker.id = 0;
+    marker.type = visualization_msgs::msg::Marker::SPHERE;
+    marker.action = visualization_msgs::msg::Marker::ADD;
+
+    // Marker位置
+    marker.pose.position.x = pos_lid.x();
+    marker.pose.position.y = pos_lid.y();
+    marker.pose.position.z = pos_lid.z();
+
+    // 由于输入的是拟合平面法向量，所以主方向（2）是约束最多的方向
+    // Marker方向 - 使用 PCA 的最小方向
+    Eigen::Vector3d axis = eigenvectors.col(0).normalized();
+    Eigen::Quaterniond quat;
+    quat.setFromTwoVectors(Eigen::Vector3d::UnitX(), axis);
+
+    marker.pose.orientation.x = quat.x();
+    marker.pose.orientation.y = quat.y();
+    marker.pose.orientation.z = quat.z();
+    marker.pose.orientation.w = quat.w();
+
+    // Marker尺寸（与特征值成比例）
+    eigenvalues = eigenvalues.normalized();
+    marker.scale.x = eigenvalues(2);  // 最大特征值
+    marker.scale.y = eigenvalues(0);
+    marker.scale.z = eigenvalues(0);  // 最小特征值
+
+    // std::cout << eigenvalues << std::endl;
+
+    // Marker颜色
+    marker.color.r = 0.0f;
+    marker.color.g = 1.0f;
+    marker.color.b = 0.0f;
+    marker.color.a = 0.5f;
+
+    marker.lifetime = rclcpp::Duration(0);
+
+    marker_pub_->publish(marker);
+}
+
+
 void LaserMapping::dump_lio_state_to_log(FILE* fp) {
     auto x_ = kf.get_x();
     V3D rot_ang = x_.rot.matrix().eulerAngles(0, 1, 2);  // ZYX顺序

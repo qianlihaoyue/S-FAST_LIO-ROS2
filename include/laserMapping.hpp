@@ -2,8 +2,7 @@
 #include <nav_msgs/msg/odometry.hpp>
 #include <nav_msgs/msg/path.hpp>
 #include <tf2_ros/transform_broadcaster.h>
-// #include <visualization_msgs/msg/marker.hpp>
-
+#include <visualization_msgs/msg/marker.hpp>
 #include <pcl/filters/voxel_grid.h>
 #include <pcl_conversions/pcl_conversions.h>
 
@@ -95,6 +94,9 @@ public:
 
     V3D Lidar_T_wrt_IMU{Zero3d};
     M3D Lidar_R_wrt_IMU{Eye3d};
+
+    rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr marker_pub_;
+    void publish_pca(const Eigen::Matrix3d& covariance_matrix);
 
     /*** EKF inputs and output ***/
     MeasureGroup Measures;
