@@ -12,6 +12,7 @@
 
 #include "IMU_Processing.hpp"
 #include "preprocess.h"
+#include "sc/sc_tools.hpp"
 
 #define INIT_TIME (0.1)
 #define LASER_POINT_COV (0.001)
@@ -98,6 +99,16 @@ public:
     rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr marker_pub_;
     void publish_pca(const Eigen::Matrix3d& covariance_matrix);
 
+    // SC
+    pcl::PointCloud<PointTypePose>::Ptr cloudKeyPoses6D{new pcl::PointCloud<PointTypePose>};
+    double surroundingkeyframeAddingAngleThreshold, surroundingkeyframeAddingDistThreshold;
+    bool scEN = false, savePCD = false;
+    SCManager scManager;
+
+    void scInit();
+    void saveKeyFramesAndLoc();
+    bool saveFrame();
+
     /*** EKF inputs and output ***/
     MeasureGroup Measures;
 
@@ -117,6 +128,7 @@ public:
         readParameters();
         initLIO();
         initLoc();
+        scInit();
     }
 
 private:

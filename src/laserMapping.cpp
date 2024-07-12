@@ -1,5 +1,9 @@
 #include "laserMapping.hpp"
 #include "common_lib.h"
+#include "sc/sc_tools.hpp"
+#include <pcl/common/io.h>
+#include <pcl/io/pcd_io.h>
+#include <string>
 
 void LaserMapping::initLIO() {
     if (p_pre->lidar_type == AVIA) {
@@ -167,6 +171,66 @@ void LaserMapping::map_incremental() {
     add_point_size = PointToAdd.size() + PointNoNeedDownsample.size();
 }
 
+Eigen::Affine3f pclPointToAffine3f(PointTypePose thisPoint) {
+    return pcl::getTransformation(thisPoint.x, thisPoint.y, thisPoint.z, thisPoint.roll, thisPoint.pitch, thisPoint.yaw);
+}
+
+void LaserMapping::scInit() {
+    declare_and_get_parameter<bool>("sc.en", scEN, false);
+    if (scEN) {
+        declare_and_get_parameter<bool>("sc.savePCD", savePCD, false);
+        declare_and_get_parameter<double>("sc.surroundingkeyframeAddingDistThreshold", surroundingkeyframeAddingDistThreshold, 1.0);
+        declare_and_get_parameter<double>("sc.surroundingkeyframeAddingAngleThreshold", surroundingkeyframeAddingAngleThreshold, 0.1);
+        createDirectoryIfNotExists(savemap_dir + "/SCDs");
+        createDirectoryIfNotExists(savemap_dir + "/Scans");
+    }
+}
+
+bool LaserMapping::saveFrame() {
+    if (cloudKeyPoses6D->points.empty()) return true;
+
+    if (Measures.lidar_beg_time - cloudKeyPoses6D->back().time > 1.0) return true;
+
+    Eigen::Affine3f transStart = pclPointToAffine3f(cloudKeyPoses6D->back());
+    Eigen::Affine3f transFinal = Eigen::Affine3f::Identity();
+    state_point = kf.get_x();
+    transFinal.linear() = state_point.rot.matrix().cast<float>();
+    transFinal.translation() = pos_lid.cast<float>();
+
+    Eigen::Affine3f transBetween = transStart.inverse() * transFinal;
+    float x, y, z, roll, pitch, yaw;
+    pcl::getTranslationAndEulerAngles(transBetween, x, y, z, roll, pitch, yaw);
+
+    if (abs(roll) < surroundingkeyframeAddingAngleThreshold && abs(pitch) < surroundingkeyframeAddingAngleThreshold &&
+        abs(yaw) < surroundingkeyframeAddingAngleThreshold && sqrt(x * x + y * y + z * z) < surroundingkeyframeAddingDistThreshold)
+        return false;
+
+    return true;
+}
+
+void LaserMapping::saveKeyFramesAndLoc() {
+    if (saveFrame() == false) return;
+
+    // add pose
+    PointTypePose pt;
+    pt.x = pos_lid(0), pt.y = pos_lid(1), pt.z = pos_lid(2);
+    pt.intensity = cloudKeyPoses6D->size();
+    V3D rot_ang = kf.get_x().rot.matrix().eulerAngles(0, 1, 2);
+    pt.roll = rot_ang(0), pt.pitch = rot_ang(1), pt.yaw = rot_ang(2);
+    pt.time = Measures.lidar_beg_time;
+    cloudKeyPoses6D->push_back(pt);
+
+    if (savePCD) {
+        pcl::PointCloud<SCPointType> laserCloudRawDS;
+        pcl::copyPointCloud(*feats_down_body, laserCloudRawDS);
+        // scManager.makeAndSaveScancontextAndKeys(laserCloudRawDS);
+        auto scd_file = savemap_dir + "SCDs/" + padZeros(cloudKeyPoses6D->size() - 1) + ".scd";
+        auto pcd_file = savemap_dir + "Scans/" + std::to_string(cloudKeyPoses6D->size() - 1) + ".pcd";
+        saveSCD(scd_file, scManager.makeScancontext(laserCloudRawDS));
+        pcl::io::savePCDFileBinary(pcd_file, laserCloudRawDS);
+    }
+}
+
 void LaserMapping::timer_callback() {
     if (sync_packages(Measures)) {
         double t0 = omp_get_wtime();
@@ -225,8 +289,10 @@ void LaserMapping::timer_callback() {
 
         /*** add the feature points to map kdtree ***/
         for (int i = 0; i < feats_down_size; i++) pointBodyToWorld(&(feats_down_body->points[i]), &(feats_down_world->points[i]));
-        if (loc_mode == false) map_incremental();
-
+        if (loc_mode == false) {
+            map_incremental();
+            if (scEN) saveKeyFramesAndLoc();
+        }
         /******* Publish points *******/
         if (path_en) publish_path(pubPath);
         if (scan_pub_en || pcd_save_en) publish_frame_world(pubLaserCloudFull);

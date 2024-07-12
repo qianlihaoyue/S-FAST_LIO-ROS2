@@ -1,24 +1,5 @@
 #include "laserMapping.hpp"
-
-#include <sys/stat.h>  // mkdir, stat
-
-inline bool createDirectoryIfNotExists(const std::string& path) {
-    struct stat info;
-    if (stat(path.c_str(), &info) != 0) {
-        // Directory does not exist, create it
-        if (mkdir(path.c_str(), 0755) == 0) {
-            return true;
-        } else {
-            std::cerr << "Error creating directory: " << path << std::endl;
-            return false;
-        }
-    } else if (info.st_mode & S_IFDIR) {
-        return true;
-    } else {
-        std::cerr << "Path exists but is not a directory: " << path << std::endl;
-        return false;
-    }
-}
+#include "sc/sc_tools.hpp"
 
 void LaserMapping::readParameters() {
     declare_and_get_parameter<bool>("publish.path_en", path_en, true);
@@ -283,7 +264,6 @@ void LaserMapping::publish_path(rclcpp::Publisher<nav_msgs::msg::Path>::SharedPt
     }
 }
 
-
 void LaserMapping::publish_pca(const Eigen::Matrix3d& covariance_matrix) {
     Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> eigensolver(covariance_matrix);
     Eigen::Vector3d eigenvalues = eigensolver.eigenvalues();
@@ -332,7 +312,6 @@ void LaserMapping::publish_pca(const Eigen::Matrix3d& covariance_matrix) {
     marker_pub_->publish(marker);
 }
 
-
 void LaserMapping::dump_lio_state_to_log(FILE* fp) {
     auto x_ = kf.get_x();
     V3D rot_ang = x_.rot.matrix().eulerAngles(0, 1, 2);  // ZYX顺序
@@ -361,6 +340,7 @@ void LaserMapping::dump_lio_state_to_log(FILE* fp) {
 
 void LaserMapping::saveMap() { saveMap(savemap_dir); }
 void LaserMapping::saveMap(const std::string& path) {
+    pcl::io::savePCDFileASCII(path + "transformations.pcd", *cloudKeyPoses6D);
     if (pcd_save_en == 1) {
         try {
             std::cout << "ori points num: " << pcl_wait_save->points.size() << std::endl;

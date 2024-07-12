@@ -1,14 +1,23 @@
 /**:
     ros__parameters:
         common:
-            lid_topic:  "/livox/lidar"
+            lid_topic:  "/livox/lidar" #_192_168_3_111
             imu_topic:  "/livox/imu"
             time_sync_en: false         # ONLY turn on when external time synchronization is really not possible
             time_offset_lidar_to_imu: 0.0  
 
-            filter_size_surf: 0.1
+            filter_size_surf: 0.5
+            filter_size_map: 0.25
+
+            # filter_size_surf: 0.5
             # filter_size_map: 0.5
-            # cube_len: 200.0
+            cube_len: 100.0
+
+        sc: 
+            en: true
+            savePCD: true
+            surroundingkeyframeAddingDistThreshold: 1.0
+            surroundingkeyframeAddingAngleThreshold: 0.2
 
         kf:
             maximum_iter: 4
@@ -19,7 +28,7 @@
         preprocess:
             lidar_type: 1                # 1 for Livox serials LiDAR, 2 for Velodyne LiDAR, 3 for ouster LiDAR, 
             scan_line: 4
-            blind: 2.0
+            blind: 0.2
             point_filter_num: 1
 
         mapping:
@@ -44,6 +53,6 @@
         pcd_save:
             pcd_save_en: 1  # 0 1(one pcd)  2()
             filter_size_savemap: 0.1
-            savemap_dir: /home/qianliyue/D:/RepoMy/save/lt/m3/
+            savemap_dir: /home/qianliyue/D:/RepoMy/save/lt/mfast/
             
            

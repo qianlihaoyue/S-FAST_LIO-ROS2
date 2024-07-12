@@ -70,6 +70,7 @@ add_library(fastlio_lib
   src/IMU_Processing.cpp
   src/preprocess.cpp
   include/ikd-Tree/ikd_Tree.cpp
+  include/sc/Scancontext.cpp
 )
 target_link_libraries(fastlio_lib ${PCL_LIBRARIES} ${Sophus_LIBRARIES})
 ament_target_dependencies(fastlio_lib ${dependencies})
