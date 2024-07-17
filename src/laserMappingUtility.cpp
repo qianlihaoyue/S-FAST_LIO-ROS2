@@ -41,6 +41,9 @@ void LaserMapping::readParameters() {
     declare_and_get_parameter<float>("kf.plane_thr", kf.plane_thr, 0.1);
     declare_and_get_parameter<bool>("kf.extrinsic_est", kf.extrinsic_est, false);
 
+    declare_and_get_parameter<float>("kf.degen_rate_max", kf.degen_rate_max, 3);
+    declare_and_get_parameter<float>("kf.degen_weight", kf.degen_weight, 0.5);
+
     declare_and_get_parameter<float>("mapping.det_range", DET_RANGE, 300.f);    // 激光雷达的最大探测范围
     declare_and_get_parameter<double>("mapping.gyr_cov", gyr_cov, 0.1);         // IMU陀螺仪的协方差
     declare_and_get_parameter<double>("mapping.acc_cov", acc_cov, 0.1);         // IMU加速度计的协方差

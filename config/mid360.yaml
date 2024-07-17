@@ -15,6 +15,9 @@
             epsi: 0.001
             NUM_MATCH_POINTS: 5
             plane_thr: 0.1
+            
+            degen_rate_max: 3.0
+            degen_weight: 1.0
 
         preprocess:
             lidar_type: 1                # 1 for Livox serials LiDAR, 2 for Velodyne LiDAR, 3 for ouster LiDAR, 

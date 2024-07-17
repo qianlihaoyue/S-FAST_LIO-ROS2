@@ -41,6 +41,10 @@ public:
     PointCloudXYZI::Ptr cloudKeyPoses3D{new PointCloudXYZI};
     pcl::KdTreeFLANN<PointType>::Ptr priorTree{new pcl::KdTreeFLANN<PointType>};
 
+    float degen_rate_max = 3;
+    float degen_weight = 0.5;
+    Eigen::Matrix3d covariance_matrix;
+
     esekf() {
         for (int i = 0; i < 10; i++) {
             PointType pt;
@@ -75,6 +79,9 @@ public:
         x_r.bg = x.bg + f_.block<3, 1>(15, 0);
         x_r.ba = x.ba + f_.block<3, 1>(18, 0);
         x_r.grav = x.grav + f_.block<3, 1>(21, 0);
+
+        // std::cout << "f_: " << f_.block<3, 1>(0, 0).transpose() << " | " << f_.block<3, 1>(12, 0).transpose() << " | x_: " << x_.pos.transpose() << " | "
+        //           << x_.vel.transpose() << std::endl;
 
         return x_r;
     }
@@ -256,6 +263,13 @@ public:
 
         if (first_frame) first_frame = false;
 
+        // 得到约束的法向
+        Eigen::Matrix3Xd vectors = Eigen::Matrix3Xd::Zero(3, effct_feat_num);
+        for (int i = 0; i < effct_feat_num; i++) vectors.col(i) = corr_normvect->points[i].getVector3fMap().cast<double>();
+        // 计算协方差
+        Eigen::MatrixXd centered = vectors.colwise() - vectors.rowwise().mean();
+        covariance_matrix = (centered * centered.transpose());
+
         // 雅可比矩阵H和残差向量的计算
         ekfom_data.h_x = Eigen::MatrixXd::Zero(effct_feat_num, 12);
         ekfom_data.h.resize(effct_feat_num);
@@ -333,6 +347,25 @@ public:
             vectorized_state dx;
             dx_new = boxminus(x_, x_propagated);  // 公式(18)中的 x^k - x^
 
+            Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> eigensolver(covariance_matrix);
+            Eigen::Vector3d eigenvalues = eigensolver.eigenvalues().normalized();
+            Eigen::Matrix3d eigenvectors = eigensolver.eigenvectors();
+
+            /////////////////////// 权重矩阵
+            Eigen::Matrix3d W = Eigen::Matrix3d::Identity();
+            float degen_rate = eigenvalues(1) / eigenvalues(0);  // 次小特征值 / 最小特征值
+            if (degen_rate > degen_rate_max) {
+                // std::cout << "degen_rate: " << degen_rate << std::endl;
+                // 计算方向性权重矩阵
+                Eigen::Vector3d direction = eigenvectors.col(0).normalized();  // 约束最小方向
+                Eigen::Matrix3d DDT = direction * direction.transpose();       // 方向的投影矩阵
+                W = W - (1.0 - degen_weight) * DDT;                            // 调整权重
+            }
+            Eigen::MatrixXd W_ext = Eigen::MatrixXd::Identity(24, 24);
+            W_ext.block<3, 3>(0, 0) = W;    // pos
+            W_ext.block<3, 3>(12, 12) = W;  // vel
+            ///////////////////////
+
             // 由于H矩阵是稀疏的，只有前12列有非零元素，后12列是零 因此这里采用分块矩阵的形式计算 减少计算量
             auto H = dyn_share.h_x;                                                     // m X 12 的矩阵
             Eigen::Matrix<double, 24, 24> HTH = Eigen::Matrix<double, 24, 24>::Zero();  // 矩阵 H^T * H
@@ -346,6 +379,11 @@ public:
             KH.block<24, 12>(0, 0) = K * H;                                            // K:24 x effectnum  H: effectnum x 12
             Eigen::Matrix<double, 24, 1> dx_ = K * dyn_share.h + (KH - Eigen::Matrix<double, 24, 24>::Identity()) * dx_new;  // 公式(18)
             // std::cout << "dx_: " << dx_.transpose() << std::endl;
+            // dx_ = W_ext * dx_;
+            // std::cout << "dx_: " << dx_.block<3, 1>(0, 0).transpose() << " | " << dx_.block<3, 1>(12, 0).transpose() << " | x_: " << x_.pos.transpose() << "
+            // "
+            //           << x_.vel.transpose() << std::endl;
+
             x_ = boxplus(x_, dx_);  // 公式(18)
 
             dyn_share.converge = true;
