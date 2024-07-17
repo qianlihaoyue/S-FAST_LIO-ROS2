@@ -121,7 +121,7 @@ public:
     double ratio_all = 0.;
     void get_match_ratio(double& all) { all = ratio_all; }
     double get_match_ratio() { return ratio_all; }
-    
+
     Eigen::Matrix3d covariance_matrix;
 
     // 计算每个特征点的残差及H矩阵
@@ -195,11 +195,16 @@ public:
             return;
         }
 
+        // 得到约束的法向
+        Eigen::Matrix3Xd vectors = Eigen::Matrix3Xd::Zero(3, effct_feat_num);
+        for (int i = 0; i < effct_feat_num; i++) vectors.col(i) = corr_normvect->points[i].getVector3fMap().cast<double>();
+        // 计算协方差
+        Eigen::MatrixXd centered = vectors.colwise() - vectors.rowwise().mean();
+        covariance_matrix = (centered * centered.transpose());
+
         // 雅可比矩阵H和残差向量的计算
         ekfom_data.h_x = Eigen::MatrixXd::Zero(effct_feat_num, 12);
         ekfom_data.h.resize(effct_feat_num);
-
-        Eigen::Matrix3Xd vectors = Eigen::Matrix3Xd::Zero(3, effct_feat_num);
 
         for (int i = 0; i < effct_feat_num; i++) {
             V3D point_(laserCloudOri->points[i].x, laserCloudOri->points[i].y, laserCloudOri->points[i].z);
@@ -213,26 +218,19 @@ public:
             const PointType& norm_p = corr_normvect->points[i];
             V3D norm_vec(norm_p.x, norm_p.y, norm_p.z);
 
-            // 添加法向量
-            vectors.col(i) = norm_vec;
-
             // 计算雅可比矩阵H
             V3D C(x_.rot.matrix().transpose() * norm_vec);
             V3D A(point_I_crossmat * C);
             if (extrinsic_est) {
                 V3D B(point_crossmat * x_.offset_R_L_I.matrix().transpose() * C);
-                ekfom_data.h_x.block<1, 12>(i, 0) << norm_p.x, norm_p.y, norm_p.z, VEC_FROM_ARRAY(A), VEC_FROM_ARRAY(B), VEC_FROM_ARRAY(C);
+                ekfom_data.h_x.block<1, 12>(i, 0) << VEC_FROM_ARRAY(norm_vec), VEC_FROM_ARRAY(A), VEC_FROM_ARRAY(B), VEC_FROM_ARRAY(C);
             } else {
-                ekfom_data.h_x.block<1, 12>(i, 0) << norm_p.x, norm_p.y, norm_p.z, VEC_FROM_ARRAY(A), 0.0, 0.0, 0.0, 0.0, 0.0, 0.0;
+                ekfom_data.h_x.block<1, 12>(i, 0) << VEC_FROM_ARRAY(norm_vec), VEC_FROM_ARRAY(A), 0.0, 0.0, 0.0, 0.0, 0.0, 0.0;
             }
 
             // 残差：点面距离
             ekfom_data.h(i) = -norm_p.intensity;
         }
-
-        // 计算协方差
-        Eigen::MatrixXd centered = vectors.colwise() - vectors.rowwise().mean();
-        covariance_matrix = (centered * centered.transpose());
     }
 
     // 广义减法
@@ -260,13 +258,12 @@ public:
         std::fill(point_selected_surf.begin(), point_selected_surf.end(), false);
 
         dyn_share_datastruct dyn_share;
-        dyn_share.valid = true;
-        dyn_share.converge = true;
+        dyn_share.valid = dyn_share.converge = true;
         int t = 0;
         state_ikfom x_propagated = x_;  // 这里的x_和P_分别是经过正向传播后的状态量和协方差矩阵，因为会先调用predict函数再调用这个函数
-        cov P_propagated = P_;
 
         vectorized_state dx_new = vectorized_state::Zero();  // 24X1的向量
+        auto I = Eigen::Matrix<double, 24, 24>::Identity();
 
         // maximum_iter: kalman最大迭代次数
         for (int i = -1; i < maximum_iter; i++) {
@@ -276,21 +273,20 @@ public:
 
             if (!dyn_share.valid) continue;
 
-            vectorized_state dx;
             dx_new = boxminus(x_, x_propagated);  // 公式(18)中的 x^k - x^
 
             // 由于H矩阵是稀疏的，只有前12列有非零元素，后12列是零 因此这里采用分块矩阵的形式计算 减少计算量
-            auto H = dyn_share.h_x;                                                     // m X 12 的矩阵
+            auto& H = dyn_share.h_x;                                                    // m X 12 的矩阵
             Eigen::Matrix<double, 24, 24> HTH = Eigen::Matrix<double, 24, 24>::Zero();  // 矩阵 H^T * H
             HTH.block<12, 12>(0, 0) = H.transpose() * H;
 
-            auto K_front = (HTH / R + P_.inverse()).inverse();
+            auto K_front = (HTH / R + P_.inverse()).inverse();  // 24 x 24
             Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic> K;
             K = K_front.block<24, 12>(0, 0) * H.transpose() / R;  // 卡尔曼增益  这里R视为常数
 
             Eigen::Matrix<double, 24, 24> KH = Eigen::Matrix<double, 24, 24>::Zero();  // 矩阵 K * H
             KH.block<24, 12>(0, 0) = K * H;                                            // K:24 x effectnum  H: effectnum x 12
-            Eigen::Matrix<double, 24, 1> dx_ = K * dyn_share.h + (KH - Eigen::Matrix<double, 24, 24>::Identity()) * dx_new;  // 公式(18)
+            Eigen::Matrix<double, 24, 1> dx_ = K * dyn_share.h + (KH - I) * dx_new;    // 公式(18)
             // std::cout << "dx_: " << dx_.transpose() << std::endl;
             x_ = boxplus(x_, dx_);  // 公式(18)
 
@@ -303,16 +299,11 @@ public:
             }
 
             if (dyn_share.converge) t++;
+            if (!t && i == maximum_iter - 2) dyn_share.converge = true;  // 如果迭代了3次还没收敛 强制 重新寻找近邻点
 
-            if (!t && i == maximum_iter - 2)  // 如果迭代了3次还没收敛 强制令成true，h_share_model函数中会重新寻找近邻点
-            {
-                dyn_share.converge = true;
-            }
-
-            // TODO:t>1改成t>0，对性能有较大提升
-            // 原始代码，收敛后仍然会进行两次
+            // TODO:t>1改成t>0，对性能有较大提升，原始代码，收敛后仍然会进行两次
             if (t > 0 || i == maximum_iter - 1) {
-                P_ = (Eigen::Matrix<double, 24, 24>::Identity() - KH) * P_;  // 公式(19)
+                P_ = (I - KH) * P_;  // 公式(19)
                 return;
             }
         }

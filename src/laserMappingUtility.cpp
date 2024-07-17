@@ -23,7 +23,7 @@ inline bool createDirectoryIfNotExists(const std::string& path) {
 void LaserMapping::readParameters() {
     declare_and_get_parameter<bool>("publish.path_en", path_en, true);
     declare_and_get_parameter<bool>("publish.scan_publish_en", scan_pub_en, true);
-    declare_and_get_parameter<bool>("publish.dense_publish_en", dense_pub_en, false);
+    // declare_and_get_parameter<bool>("publish.dense_publish_en", dense_pub_en, false);
     declare_and_get_parameter<bool>("publish.runtime_pos_log", runtime_pos_log, true);
 
     declare_and_get_parameter<string>("common.lid_topic", lid_topic, "/livox/lidar");
@@ -46,7 +46,6 @@ void LaserMapping::readParameters() {
     declare_and_get_parameter<double>("mapping.acc_cov", acc_cov, 0.1);         // IMU加速度计的协方差
     declare_and_get_parameter<double>("mapping.b_gyr_cov", b_gyr_cov, 0.0001);  // IMU陀螺仪偏置的协方差
     declare_and_get_parameter<double>("mapping.b_acc_cov", b_acc_cov, 0.0001);  // IMU加速度计偏置的协方差
-    declare_and_get_parameter<bool>("mapping.extrinsic_est_en", extrinsic_est_en, false);
 
     declare_and_get_parameter<double>("preprocess.blind", p_pre->blind, 0.01);         // 最小距离阈值，即过滤掉0～blind范围内的点云
     declare_and_get_parameter<int>("preprocess.lidar_type", p_pre->lidar_type, AVIA);  // 激光雷达的类型
@@ -191,26 +190,26 @@ bool LaserMapping::sync_packages(MeasureGroup& meas) {
 
 void LaserMapping::publish_frame_world(rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pubLaserCloudFull) {
     PointCloudXYZI::Ptr laserCloudEffect(new PointCloudXYZI());
-    for (auto& i : kf.effect_idx) laserCloudEffect->points.push_back(feats_down_world->points[i]);
+    // for (auto& i : kf.effect_idx) laserCloudEffect->points.push_back(feats_down_world->points[i]);
 
-    if (pcd_save_en == 1 && scan_num % 5 == 0) {
-        PointCloudXYZI tmpcloud;
-        downSizeFilterSaveMap.setInputCloud(feats_down_world);
-        downSizeFilterSaveMap.filter(tmpcloud);
-        *pcl_wait_save += tmpcloud;
+    // if (pcd_save_en == 1 && scan_num % 5 == 0) {
+    //     PointCloudXYZI tmpcloud;
+    //     downSizeFilterSaveMap.setInputCloud(feats_down_world);
+    //     downSizeFilterSaveMap.filter(tmpcloud);
+    //     *pcl_wait_save += tmpcloud;
 
-        downSizeFilterSaveMap.setInputCloud(laserCloudEffect);
-        downSizeFilterSaveMap.filter(tmpcloud);
-        *pcl_effect_save += tmpcloud;
-    }
+    //     // downSizeFilterSaveMap.setInputCloud(laserCloudEffect);
+    //     // downSizeFilterSaveMap.filter(tmpcloud);
+    //     // *pcl_effect_save += tmpcloud;
+    // }
 
-    if (pcd_save_en == 1 && scan_num % 100 == 0) {
-        downSizeFilterSaveMap.setInputCloud(pcl_wait_save);
-        downSizeFilterSaveMap.filter(*pcl_wait_save);
+    // if (pcd_save_en == 1 && scan_num % 100 == 0) {
+    //     downSizeFilterSaveMap.setInputCloud(pcl_wait_save);
+    //     downSizeFilterSaveMap.filter(*pcl_wait_save);
 
-        downSizeFilterSaveMap.setInputCloud(pcl_effect_save);
-        downSizeFilterSaveMap.filter(*pcl_effect_save);
-    }
+    //     // downSizeFilterSaveMap.setInputCloud(pcl_effect_save);
+    //     // downSizeFilterSaveMap.filter(*pcl_effect_save);
+    // }
 
     if (scan_pub_en) {
         *laserCloudEffect = *feats_down_world;
@@ -283,7 +282,6 @@ void LaserMapping::publish_path(rclcpp::Publisher<nav_msgs::msg::Path>::SharedPt
     }
 }
 
-
 void LaserMapping::publish_pca(const Eigen::Matrix3d& covariance_matrix) {
     Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> eigensolver(covariance_matrix);
     Eigen::Vector3d eigenvalues = eigensolver.eigenvalues();
@@ -332,7 +330,6 @@ void LaserMapping::publish_pca(const Eigen::Matrix3d& covariance_matrix) {
     marker_pub_->publish(marker);
 }
 
-
 void LaserMapping::dump_lio_state_to_log(FILE* fp) {
     auto x_ = kf.get_x();
     V3D rot_ang = x_.rot.matrix().eulerAngles(0, 1, 2);  // ZYX顺序
@@ -362,6 +359,7 @@ void LaserMapping::dump_lio_state_to_log(FILE* fp) {
 void LaserMapping::saveMap() { saveMap(savemap_dir); }
 void LaserMapping::saveMap(const std::string& path) {
     if (pcd_save_en == 1) {
+        for (auto& cloud : pcl_save_block) *pcl_wait_save += std::move(*cloud);
         try {
             std::cout << "ori points num: " << pcl_wait_save->points.size() << std::endl;
             downSizeFilterSaveMap.setInputCloud(pcl_wait_save);
@@ -372,7 +370,9 @@ void LaserMapping::saveMap(const std::string& path) {
         }
 
         std::cout << " pcd save to: " << path << std::endl;
-        pcl::io::savePCDFileBinary(path + "scans.pcd", *pcl_wait_save);
-        pcl::io::savePCDFileBinary(path + "effect.pcd", *pcl_effect_save);
+        pcl::PointCloud<pcl::PointXYZI>::Ptr pcl_wait_save_xyzi{new pcl::PointCloud<pcl::PointXYZI>()};
+        pcl::copyPointCloud(*pcl_wait_save, *pcl_wait_save_xyzi);
+        pcl::io::savePCDFileBinary(path + "scans.pcd", *pcl_wait_save_xyzi);
+        // pcl::io::savePCDFileBinary(path + "effect.pcd", *pcl_effect_save);
     }
 }

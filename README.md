@@ -11,6 +11,7 @@
 
 - 2.3 - 6.23 - 引出kf参数，添加log输出
 - 2.4 - 7.11 - 添加PCA法向分析
+- 2.5 - 7.17 - 取消submap移动，优化地图保存逻辑
 
 
 ## Simplified Implementation of FAST_LIO

@@ -34,7 +34,7 @@ public:
 
     /*** Time Log Variables ***/
     int add_point_size = 0, kdtree_delete_counter = 0;
-    bool time_sync_en = false, extrinsic_est_en = false, path_en = true, runtime_pos_log = false;
+    bool time_sync_en = false, path_en = true, runtime_pos_log = false;
     FILE* fp;
     void dump_lio_state_to_log(FILE* fp);
     std::ofstream fout_traj;
@@ -83,6 +83,8 @@ public:
     std::string savemap_dir;
     PointCloudXYZI::Ptr pcl_wait_save{new PointCloudXYZI()};
     PointCloudXYZI::Ptr pcl_effect_save{new PointCloudXYZI()};
+    std::vector<PointCloudXYZI::Ptr> pcl_save_block;
+    void savemap_callback();
     void saveMap();
     void saveMap(const std::string& path);
 

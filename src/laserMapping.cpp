@@ -22,6 +22,7 @@ void LaserMapping::initLIO() {
     marker_pub_ = this->create_publisher<visualization_msgs::msg::Marker>("pca_marker", 10);
     tf_broadcaster = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
     timer_ = rclcpp::create_timer(this, this->get_clock(), std::chrono::milliseconds(10), std::bind(&LaserMapping::timer_callback, this));
+    auto timer_savemap_ = rclcpp::create_timer(this, this->get_clock(), std::chrono::seconds(10), std::bind(&LaserMapping::savemap_callback, this));
 
     downSizeFilterSurf.setLeafSize(filter_size_surf_min, filter_size_surf_min, filter_size_surf_min);
     // downSizeFilterMap.setLeafSize(filter_size_map_min, filter_size_map_min, filter_size_map_min);
@@ -125,26 +126,26 @@ void LaserMapping::lasermap_fov_segment() {
 
 // 根据最新估计位姿  增量添加点云到map
 void LaserMapping::map_incremental() {
-    PointVector PointToAdd;
-    PointVector PointNoNeedDownsample;
+    PointCloudXYZI PointToAdd;
+    PointCloudXYZI PointNoNeedDownsample;
+    PointCloudXYZI PointSave;
     PointToAdd.reserve(feats_down_size);
     PointNoNeedDownsample.reserve(feats_down_size);
     for (int i = 0; i < feats_down_size; i++) {
-        // 转换到世界坐标系
-        // pointBodyToWorld(&(feats_down_body->points[i]), &(feats_down_world->points[i]));
+        auto& p_world = feats_down_world->points[i];
 
         if (!Nearest_Points[i].empty() && flg_EKF_inited) {
             const PointVector& points_near = Nearest_Points[i];
             bool need_add = true;
             BoxPointType Box_of_Point;
             PointType mid_point;  // 点所在体素的中心
-            mid_point.x = floor(feats_down_world->points[i].x / filter_size_map_min) * filter_size_map_min + 0.5 * filter_size_map_min;
-            mid_point.y = floor(feats_down_world->points[i].y / filter_size_map_min) * filter_size_map_min + 0.5 * filter_size_map_min;
-            mid_point.z = floor(feats_down_world->points[i].z / filter_size_map_min) * filter_size_map_min + 0.5 * filter_size_map_min;
-            float dist = calc_dist(feats_down_world->points[i], mid_point);
+            mid_point.x = floor(p_world.x / filter_size_map_min) * filter_size_map_min + 0.5 * filter_size_map_min;
+            mid_point.y = floor(p_world.y / filter_size_map_min) * filter_size_map_min + 0.5 * filter_size_map_min;
+            mid_point.z = floor(p_world.z / filter_size_map_min) * filter_size_map_min + 0.5 * filter_size_map_min;
+            float dist = calc_dist(p_world, mid_point);
             if (fabs(points_near[0].x - mid_point.x) > 0.5 * filter_size_map_min && fabs(points_near[0].y - mid_point.y) > 0.5 * filter_size_map_min &&
                 fabs(points_near[0].z - mid_point.z) > 0.5 * filter_size_map_min) {
-                PointNoNeedDownsample.push_back(feats_down_world->points[i]);  // 如果距离最近的点都在体素外，则该点不需要Downsample
+                PointNoNeedDownsample.push_back(p_world);  // 如果距离最近的点都在体素外，则该点不需要Downsample
                 continue;
             }
             for (int j = 0; j < kf.NUM_MATCH_POINTS; j++) {
@@ -155,16 +156,40 @@ void LaserMapping::map_incremental() {
                     break;
                 }
             }
-            if (need_add) PointToAdd.push_back(feats_down_world->points[i]);
+            if (need_add)
+                PointToAdd.push_back(p_world);
+            else if (pcd_save_en) {
+                // 只要最近点距离大于 filter_size_savemap
+                if (calc_dist(points_near[0], p_world) > filter_size_savemap) PointSave.push_back(p_world);
+            }
         } else {
-            PointToAdd.push_back(feats_down_world->points[i]);
+            PointToAdd.push_back(p_world);
         }
     }
 
     double st_time = omp_get_wtime();
-    add_point_size = ikdtree.Add_Points(PointToAdd, true);
-    ikdtree.Add_Points(PointNoNeedDownsample, false);
+    add_point_size = ikdtree.Add_Points(PointToAdd.points, true);
+    ikdtree.Add_Points(PointNoNeedDownsample.points, false);
     add_point_size = PointToAdd.size() + PointNoNeedDownsample.size();
+
+    if (pcd_save_en) {
+        *pcl_wait_save += PointToAdd;
+        *pcl_wait_save += PointNoNeedDownsample;
+        *pcl_wait_save += PointSave;
+    }
+}
+
+std::mutex pcl_save_mutex_;
+void LaserMapping::savemap_callback() {
+    if (pcd_save_en == false || pcl_wait_save->empty()) return;
+    PointCloudXYZI::Ptr pcl_buff_save{new PointCloudXYZI()};
+    {
+        std::lock_guard<std::mutex> lock(pcl_save_mutex_);
+        *pcl_buff_save = std::move(*pcl_wait_save);
+    }
+    downSizeFilterSaveMap.setInputCloud(pcl_buff_save);
+    downSizeFilterSaveMap.filter(*pcl_buff_save);
+    pcl_save_block.push_back(pcl_buff_save);
 }
 
 void LaserMapping::timer_callback() {
@@ -191,7 +216,7 @@ void LaserMapping::timer_callback() {
         flg_EKF_inited = (Measures.lidar_beg_time - first_lidar_time) < INIT_TIME ? false : true;
 
         // FIXME:
-        if (loc_mode == false) lasermap_fov_segment();  // 更新localmap边界，然后降采样当前帧点云
+        if (false) lasermap_fov_segment();  // 更新localmap边界，然后降采样当前帧点云
 
         downSizeFilterSurf.setInputCloud(feats_undistort);
         downSizeFilterSurf.filter(*feats_down_body);
