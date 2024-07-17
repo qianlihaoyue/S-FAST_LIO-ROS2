@@ -60,6 +60,12 @@ void LaserMapping::readParameters() {
     declare_and_get_parameter<string>("pcd_save.savemap_dir", savemap_dir, string(ROOT_DIR) + "PCD/");
     downSizeFilterSaveMap.setLeafSize(filter_size_savemap, filter_size_savemap, filter_size_savemap);
 
+    declare_and_get_parameter<bool>("wheel.use_wheel", USE_WHEEL, false);
+    declare_and_get_parameter<string>("wheel.wheel_topic", wheel_topic, "/agv_connect/carOdometry");
+    declare_and_get_parameter<vector<double>>("wheel.extrinsic_T", extrinT_wheel, vector<double>());
+    declare_and_get_parameter<vector<double>>("wheel.extrinsic_R", extrinR_wheel, vector<double>());
+    declare_and_get_parameter<double>("wheel.wheel_cov", wheel_cov, 0.01);
+
     createDirectoryIfNotExists(savemap_dir);
     fp = fopen((savemap_dir + "/pos_log.csv").c_str(), "w");
     if (fp == nullptr) std::cerr << "Failed to open file for writing" << std::endl;
@@ -145,6 +151,23 @@ void LaserMapping::imu_cbk(const sensor_msgs::msg::Imu::UniquePtr msg_in) {
     // sig_buffer.notify_all();
 }
 
+void LaserMapping::wheel_cbk(const nav_msgs::msg::Odometry::UniquePtr msg_in) {
+    nav_msgs::msg::Odometry::SharedPtr msg(new nav_msgs::msg::Odometry(*msg_in));
+
+    double timestamp = get_time_sec(msg->header.stamp);
+
+    mtx_buffer.lock();
+    if (timestamp < last_timestamp_wheel) {
+        std::cerr << "wheel loop back, clear buffer" << std::endl;
+        wheel_buffer.clear();
+    }
+    last_timestamp_wheel = timestamp;
+
+    wheel_buffer.push_back(msg);
+    mtx_buffer.unlock();
+    // sig_buffer.notify_all();
+}
+
 // 把当前要处理的LIDAR和IMU数据打包到meas
 bool LaserMapping::sync_packages(MeasureGroup& meas) {
     if (lidar_buffer.empty() || imu_buffer.empty()) return false;
@@ -181,6 +204,19 @@ bool LaserMapping::sync_packages(MeasureGroup& meas) {
         if (imu_time > lidar_end_time) break;
         meas.imu.push_back(imu_buffer.front());
         imu_buffer.pop_front();
+    }
+
+    /*** find the closet wheel frame to the last imu frame ***/
+    if (USE_WHEEL && !wheel_buffer.empty()) {
+        meas.wheel.clear();
+        double wheel_time = get_time_sec(wheel_buffer.front()->header.stamp);
+        // 记录wheel数据，wheel时间小于当前帧lidar结束时间
+        while ((!wheel_buffer.empty()) && (wheel_time < lidar_end_time)) {
+            wheel_time = get_time_sec(wheel_buffer.front()->header.stamp);
+            if (wheel_time > lidar_end_time) break;
+            meas.wheel.push_back(wheel_buffer.front());  // 记录当前lidar帧内的wheel数据到meas.wheel
+            wheel_buffer.pop_front();
+        }
     }
 
     lidar_buffer.pop_front();
@@ -283,7 +319,6 @@ void LaserMapping::publish_path(rclcpp::Publisher<nav_msgs::msg::Path>::SharedPt
     }
 }
 
-
 void LaserMapping::publish_pca(const Eigen::Matrix3d& covariance_matrix) {
     Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> eigensolver(covariance_matrix);
     Eigen::Vector3d eigenvalues = eigensolver.eigenvalues();
@@ -332,7 +367,6 @@ void LaserMapping::publish_pca(const Eigen::Matrix3d& covariance_matrix) {
     marker_pub_->publish(marker);
 }
 
-
 void LaserMapping::dump_lio_state_to_log(FILE* fp) {
     auto x_ = kf.get_x();
     V3D rot_ang = x_.rot.matrix().eulerAngles(0, 1, 2);  // ZYX顺序
@@ -341,13 +375,20 @@ void LaserMapping::dump_lio_state_to_log(FILE* fp) {
     fprintf(fp, "%lf ,%lf ,%lf ,", rot_ang(0), rot_ang(1), rot_ang(2));  // Angle
     fprintf(fp, "%lf ,%lf ,%lf ,", x_.pos(0), x_.pos(1), x_.pos(2));     // Pos
 
-    // Debug
-    fprintf(fp, "%d ,%d ,", feats_down_size, (int)(kf.get_match_ratio() * 100));
+    auto pos_w2imu = Wheel_R_wrt_IMU * p_imu->pos_wheel + Wheel_T_wrt_IMU;
+    fprintf(fp, "%lf ,%lf ,%lf ,", pos_w2imu(0), pos_w2imu(1), pos_w2imu(2));  // Pos
 
-    fprintf(fp, "%lf ,%lf ,%lf ,", x_.vel(0), x_.vel(1), x_.vel(2));    // Vel
-    fprintf(fp, "%lf ,%lf ,%lf ,", x_.bg(0), x_.bg(1), x_.bg(2));       // Bias_g
-    fprintf(fp, "%lf ,%lf ,%lf ,", x_.ba(0), x_.ba(1), x_.ba(2));       // Bias_a
-    fprintf(fp, "%lf ,%lf ,%lf ", x_.grav(0), x_.grav(1), x_.grav(2));  // Bias_a
+    // Debug
+    fprintf(fp, "%d ,%d , - ,", feats_down_size, (int)(kf.get_match_ratio() * 100));
+
+    fprintf(fp, "%lf ,%lf ,%lf ,", x_.vel(0), x_.vel(1), x_.vel(2));  // Vel
+
+    Eigen::Vector3d transformed_velocity = Wheel_R_wrt_IMU * x_.rot.matrix() * p_imu->wheel_velocity;
+    fprintf(fp, "%lf ,%lf ,%lf ,", p_imu->wheel_velocity.x(), transformed_velocity.x(), transformed_velocity.y());  // Vel
+
+    // fprintf(fp, "%lf ,%lf ,%lf ,", x_.bg(0), x_.bg(1), x_.bg(2));       // Bias_g
+    // fprintf(fp, "%lf ,%lf ,%lf ,", x_.ba(0), x_.ba(1), x_.ba(2));       // Bias_a
+    // fprintf(fp, "%lf ,%lf ,%lf ", x_.grav(0), x_.grav(1), x_.grav(2));  // Bias_a
     fprintf(fp, "\r\n");
 
     fflush(fp);

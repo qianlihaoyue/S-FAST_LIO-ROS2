@@ -10,6 +10,8 @@ void LaserMapping::initLIO() {
                                                                               std::bind(&LaserMapping::standard_pcl_cbk, this, std::placeholders::_1));
     }
     sub_imu = this->create_subscription<sensor_msgs::msg::Imu>(imu_topic, 10, std::bind(&LaserMapping::imu_cbk, this, std::placeholders::_1));
+    sub_wheel = this->create_subscription<nav_msgs::msg::Odometry>(wheel_topic, 10, std::bind(&LaserMapping::wheel_cbk, this, std::placeholders::_1));
+
     pubLaserCloudFull = this->create_publisher<sensor_msgs::msg::PointCloud2>("/cloud_registered", 20);
     pubLaserCloudFull_body = this->create_publisher<sensor_msgs::msg::PointCloud2>("/cloud_registered_body", 20);
     pubLaserCloudEffect = this->create_publisher<sensor_msgs::msg::PointCloud2>("/cloud_effected", 20);
@@ -30,6 +32,11 @@ void LaserMapping::initLIO() {
     Lidar_R_wrt_IMU << MAT_FROM_ARRAY(extrinR);
     p_imu->set_param(Lidar_T_wrt_IMU, Lidar_R_wrt_IMU, V3D(gyr_cov, gyr_cov, gyr_cov), V3D(acc_cov, acc_cov, acc_cov), V3D(b_gyr_cov, b_gyr_cov, b_gyr_cov),
                      V3D(b_acc_cov, b_acc_cov, b_acc_cov));
+
+    Wheel_T_wrt_IMU << VEC_FROM_ARRAY(extrinT_wheel);
+    Wheel_R_wrt_IMU << MAT_FROM_ARRAY(extrinR_wheel);
+    p_imu->set_param_wheel(USE_WHEEL, Eye3d * wheel_cov, Wheel_R_wrt_IMU.transpose() * (-Wheel_T_wrt_IMU));
+    kf.Wheel_R_wrt_IMU = Wheel_R_wrt_IMU;
 }
 
 void LaserMapping::initLoc() {
@@ -191,7 +198,7 @@ void LaserMapping::timer_callback() {
         flg_EKF_inited = (Measures.lidar_beg_time - first_lidar_time) < INIT_TIME ? false : true;
 
         // FIXME:
-        if (loc_mode == false) lasermap_fov_segment();  // 更新localmap边界，然后降采样当前帧点云
+        if (false) lasermap_fov_segment();  // 更新localmap边界，然后降采样当前帧点云
 
         downSizeFilterSurf.setInputCloud(feats_undistort);
         downSizeFilterSurf.filter(*feats_down_body);
@@ -229,6 +236,7 @@ void LaserMapping::timer_callback() {
 
         /******* Publish points *******/
         if (path_en) publish_path(pubPath);
+        // FIXME:地图保存很费时间
         if (scan_pub_en || pcd_save_en) publish_frame_world(pubLaserCloudFull);
         publish_pca(kf.covariance_matrix);
 

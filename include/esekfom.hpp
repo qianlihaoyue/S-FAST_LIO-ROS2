@@ -267,6 +267,7 @@ public:
         cov P_propagated = P_;
 
         vectorized_state dx_new = vectorized_state::Zero();  // 24X1的向量
+        auto I = Eigen::Matrix<double, 24, 24>::Identity();
 
         // maximum_iter: kalman最大迭代次数
         for (int i = -1; i < maximum_iter; i++) {
@@ -290,8 +291,8 @@ public:
 
             Eigen::Matrix<double, 24, 24> KH = Eigen::Matrix<double, 24, 24>::Zero();  // 矩阵 K * H
             KH.block<24, 12>(0, 0) = K * H;                                            // K:24 x effectnum  H: effectnum x 12
-            Eigen::Matrix<double, 24, 1> dx_ = K * dyn_share.h + (KH - Eigen::Matrix<double, 24, 24>::Identity()) * dx_new;  // 公式(18)
-            // std::cout << "dx_: " << dx_.transpose() << std::endl;
+            Eigen::Matrix<double, 24, 1> dx_ = K * dyn_share.h + (KH - I) * dx_new;    // 公式(18)
+
             x_ = boxplus(x_, dx_);  // 公式(18)
 
             dyn_share.converge = true;
@@ -312,7 +313,71 @@ public:
             // TODO:t>1改成t>0，对性能有较大提升
             // 原始代码，收敛后仍然会进行两次
             if (t > 0 || i == maximum_iter - 1) {
-                P_ = (Eigen::Matrix<double, 24, 24>::Identity() - KH) * P_;  // 公式(19)
+                P_ = (I - KH) * P_;  // 公式(19)
+                return;
+            }
+        }
+    }
+
+    // Wheel
+    Eigen::Matrix3d Wheel_R_wrt_IMU;
+    const double wheel_s = 1;
+
+    void h_share_model_wheel(dyn_share_datastruct& ekfom_data, V3D wheel_v_vec) {
+        ekfom_data.h_x = Eigen::MatrixXd::Zero(3, 33);
+        ekfom_data.h.resize(3);
+
+        // residual
+        // V3D res = wheel_v_vec * wheel_s - R_I_W * (rotT * x_.vel + angv_crossmat * offset_T_W_I);
+        V3D res = x_.vel - Wheel_R_wrt_IMU * x_.rot.matrix() * wheel_v_vec * wheel_s;
+
+        ekfom_data.h(0) = 0 - res.x();  // TIPS: 此处修改为负
+        ekfom_data.h(1) = 0 - res.y();
+        ekfom_data.h(2) = 0 - res.z();
+
+        // jacobian
+        M3D rot_crossmat;
+        rot_crossmat << SKEW_SYM_MATRX((x_.rot.matrix() * wheel_v_vec));    // 当前状态imu系下 点坐标反对称矩阵
+        ekfom_data.h_x.block<3, 3>(0, 3) = Wheel_R_wrt_IMU * rot_crossmat;  // diff w.r.t. rot
+        ekfom_data.h_x.block<3, 3>(0, 12) = Eye3d;                          // diff w.r.t. vel
+
+        // ekfom_data.R = Eye3d * wheel_cov; // covariance
+    }
+
+    void update_iterated_dyn_share_wheel(const M3D& R, V3D wheel_v_vec) {
+        dyn_share_datastruct dyn_share;
+
+        int t = 0;
+        state_ikfom x_propagated = x_;  // 这里的x_和P_分别是经过正向传播后的状态量和协方差矩阵，因为会先调用predict函数再调用这个函数
+
+        Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic> K;  // DIM * 3
+        Eigen::Matrix<double, 24, 1> dx_;                         // DIM * 1
+        auto I = Eigen::Matrix<double, 24, 24>::Identity();
+
+        for (int i = -1; i < maximum_iter; i++) {
+            h_share_model_wheel(dyn_share, wheel_v_vec);
+
+            vectorized_state dx_new = boxminus(x_, x_propagated);
+
+            auto H = dyn_share.h_x;
+            K = P_ * H.transpose() * (H * P_ * H.transpose() + R).inverse();
+            dx_ = K * dyn_share.h + (K * H - I) * dx_new;
+            x_ = boxplus(x_, dx_);
+
+            dyn_share.converge = true;
+            for (int j = 0; j < 24; j++) {
+                if (std::fabs(dx_[j]) > epsi) {  // 如果dx>epsi 认为没有收敛
+                    dyn_share.converge = false;
+                    break;
+                }
+            }
+
+            if (dyn_share.converge) t++;
+
+            if (!t && i == maximum_iter - 2) dyn_share.converge = true;
+
+            if (t > 0 || i == maximum_iter - 1) {
+                P_ = (I - K * H) * P_;  // 公式(19)
                 return;
             }
         }

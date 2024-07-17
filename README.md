@@ -12,6 +12,11 @@
 - 2.3 - 6.23 - 引出kf参数，添加log输出
 - 2.4 - 7.11 - 添加PCA法向分析
 
+- branch - wheel
+
+- b1.0 - 7.17 - add wheel
+
+
 
 ## Simplified Implementation of FAST_LIO
 
@@ -66,3 +71,5 @@ sudo make install
 
 ## 7. Acknowledgements
 Thanks for the authors of [FAST-LIO](https://github.com/hku-mars/FAST_LIO).
+
+- [FAST-LIO-Multi-Sensor-Fusion](https://github.com/zhh2005757/FAST-LIO-Multi-Sensor-Fusion)

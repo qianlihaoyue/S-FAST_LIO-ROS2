@@ -1,4 +1,5 @@
 #include "IMU_Processing.hpp"
+#include <Eigen/src/Core/Matrix.h>
 
 ImuProcess::ImuProcess() : b_first_frame_(true), imu_need_init_(true), start_timestamp_(-1) {
     init_iter_num = 1;                           // 初始化迭代次数
@@ -81,6 +82,14 @@ void ImuProcess::IMU_init(const MeasureGroup& meas, esekfom::esekf& kf_state, in
     init_state.bg = mean_gyr;                   // 角速度测量作为陀螺仪偏差
     init_state.offset_T_L_I = Lidar_T_wrt_IMU;  // 将lidar和imu外参传入
     init_state.offset_R_L_I = Sophus::SO3(Lidar_R_wrt_IMU);
+
+    /*** wheel velocity initialization ***/
+    // if (USE_WHEEL && !meas.wheel.empty()) {
+    //     double wheel_velocity = meas.wheel.back()->twist.twist.linear.x;
+    //     V3D wheel_v_vec(wheel_velocity, 0.0, 0.0);
+    //     init_state.vel = Wheel_R_wrt_IMU * (wheel_v_vec * wheel_s);  // initial rot is identity matrix
+    // }
+
     kf_state.change_x(init_state);  // 将初始化后的状态传入esekfom.hpp中的x_
 
     Eigen::Matrix<double, 24, 24> init_P = Eigen::MatrixXd::Identity(24, 24);  // 在esekfom.hpp获得P_的协方差矩阵
@@ -96,7 +105,7 @@ void ImuProcess::IMU_init(const MeasureGroup& meas, esekfom::esekf& kf_state, in
 }
 
 // 反向传播
-void ImuProcess::UndistortPcl(const MeasureGroup& meas, esekfom::esekf& kf_state, PointCloudXYZI& pcl_out) {
+void ImuProcess::UndistortPcl(MeasureGroup& meas, esekfom::esekf& kf_state, PointCloudXYZI& pcl_out) {
     /***将上一帧最后尾部的imu添加到当前帧头部的imu ***/
     auto v_imu = meas.imu;                                                  // 取出当前帧的IMU队列
     v_imu.push_front(last_imu_);                                            // 将上一帧最后尾部的imu添加到当前帧头部的imu
@@ -149,6 +158,44 @@ void ImuProcess::UndistortPcl(const MeasureGroup& meas, esekfom::esekf& kf_state
         Q.block<3, 3>(9, 9).diagonal() = cov_bias_acc;
 
         kf_state.predict(dt, Q, in);  // IMU前向传播，每次传播的时间间隔为dt
+
+        // static Eigen::Vector3d pos_wheel = Wheel_R_wrt_IMU.transpose() * (-Wheel_T_wrt_IMU);
+
+        /*** update by wheel meas ***/
+
+        static double last_wheel_time = 0;
+        if (USE_WHEEL && !meas.wheel.empty()) {
+            // 掐头
+            while (get_time_sec(meas.wheel.front()->header.stamp) < get_time_sec(head->header.stamp)) {
+                meas.wheel.pop_front();
+            }
+
+            // wheel 位于两个imu之间
+            while (meas.wheel.size() && get_time_sec(meas.wheel.front()->header.stamp) < get_time_sec(tail->header.stamp)) {
+#if 0
+                double wheel_time = get_time_sec(meas.wheel.front()->header.stamp);
+                if (last_wheel_time == 0) last_wheel_time = wheel_time;
+                // pos 相对于车体，侧移的时候数据正常（y改变）
+                auto& wpos = meas.wheel.front()->pose.pose.position;
+                Eigen::Vector3d pos_delta(wpos.x, wpos.y, wpos.z);
+                pos_delta = pos_delta * (wheel_time - last_wheel_time) / 0.05;  // 修正，当时间等于50ms时，pos_delta不变，防止丢包导致积分减少
+                pos_delta = kf_state.get_x().rot * pos_delta;                   // 通过旋转修正
+                // 自旋的时候仍然有问题
+                pos_wheel += pos_delta;                                     // 累加
+                // pos_w2imu = Wheel_R_wrt_IMU * pos_wheel + Wheel_T_wrt_IMU;  // 通过外参转移到imu坐标系
+
+#endif
+                auto&& wdata = meas.wheel.front()->twist.twist.linear;
+                wheel_velocity << wdata.x, wdata.y, wdata.z;                              // x 0 0
+                kf_state.update_iterated_dyn_share_wheel(cov_wheel_nhc, wheel_velocity);  // wheel更新
+
+                meas.wheel.pop_front();
+
+#if 0
+                last_wheel_time = wheel_time;
+#endif
+            }
+        }
 
         imu_state = kf_state.get_x();  // 更新IMU状态为积分后的状态
         // 更新上一帧角速度 = 后一帧角速度-bias
@@ -211,7 +258,7 @@ void ImuProcess::UndistortPcl(const MeasureGroup& meas, esekfom::esekf& kf_state
     }
 }
 
-void ImuProcess::Process(const MeasureGroup& meas, esekfom::esekf& kf_state, PointCloudXYZI::Ptr& cur_pcl_un_) {
+void ImuProcess::Process(MeasureGroup& meas, esekfom::esekf& kf_state, PointCloudXYZI::Ptr& cur_pcl_un_) {
     if (meas.imu.empty()) return;
 
     assert(meas.lidar != nullptr);
