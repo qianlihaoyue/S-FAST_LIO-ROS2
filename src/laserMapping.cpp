@@ -6,11 +6,12 @@ void LaserMapping::initLIO() {
         sub_pcl_livox =
             this->create_subscription<livox_ros_driver2::msg::CustomMsg>(lid_topic, 20, std::bind(&LaserMapping::livox_pcl_cbk, this, std::placeholders::_1));
     } else {
-        sub_pcl_pc = this->create_subscription<sensor_msgs::msg::PointCloud2>(lid_topic, rclcpp::SensorDataQoS(),
-                                                                              std::bind(&LaserMapping::standard_pcl_cbk, this, std::placeholders::_1));
+        sub_pcl_pc =
+            this->create_subscription<sensor_msgs::msg::PointCloud2>(lid_topic, 20, std::bind(&LaserMapping::standard_pcl_cbk, this, std::placeholders::_1));
     }
     sub_imu = this->create_subscription<sensor_msgs::msg::Imu>(imu_topic, 10, std::bind(&LaserMapping::imu_cbk, this, std::placeholders::_1));
     sub_wheel = this->create_subscription<nav_msgs::msg::Odometry>(wheel_topic, 10, std::bind(&LaserMapping::wheel_cbk, this, std::placeholders::_1));
+    sub_gnss = this->create_subscription<sensor_msgs::msg::NavSatFix>(gnss_topic, 10, std::bind(&LaserMapping::gnss_cbk, this, std::placeholders::_1));
 
     pubLaserCloudFull = this->create_publisher<sensor_msgs::msg::PointCloud2>("/cloud_registered", 20);
     pubLaserCloudFull_body = this->create_publisher<sensor_msgs::msg::PointCloud2>("/cloud_registered_body", 20);
@@ -28,14 +29,10 @@ void LaserMapping::initLIO() {
     downSizeFilterSurf.setLeafSize(filter_size_surf_min, filter_size_surf_min, filter_size_surf_min);
     // downSizeFilterMap.setLeafSize(filter_size_map_min, filter_size_map_min, filter_size_map_min);
 
-    Lidar_T_wrt_IMU << VEC_FROM_ARRAY(extrinT);
-    Lidar_R_wrt_IMU << MAT_FROM_ARRAY(extrinR);
     p_imu->set_param(Lidar_T_wrt_IMU, Lidar_R_wrt_IMU, V3D(gyr_cov, gyr_cov, gyr_cov), V3D(acc_cov, acc_cov, acc_cov), V3D(b_gyr_cov, b_gyr_cov, b_gyr_cov),
                      V3D(b_acc_cov, b_acc_cov, b_acc_cov));
 
-    Wheel_T_wrt_IMU << VEC_FROM_ARRAY(extrinT_wheel);
-    Wheel_R_wrt_IMU << MAT_FROM_ARRAY(extrinR_wheel);
-    p_imu->set_param_wheel(USE_WHEEL, Eye3d * wheel_cov, Wheel_R_wrt_IMU.transpose() * (-Wheel_T_wrt_IMU));
+    p_imu->set_param_wheel(Eye3d * wheel_cov, Wheel_R_wrt_IMU.transpose() * (-Wheel_T_wrt_IMU));
     kf.Wheel_R_wrt_IMU = Wheel_R_wrt_IMU;
 }
 

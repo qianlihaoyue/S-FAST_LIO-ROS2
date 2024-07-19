@@ -31,16 +31,17 @@ public:
     double first_lidar_time;  // 当前帧第一个点云时间
 
     // wheel
-    bool USE_WHEEL = false;
     M3D cov_wheel_nhc{Eye3d * 0.01};
-
     V3D pos_wheel{V3D::Zero()};
     Eigen::Vector3d wheel_velocity;
-    void set_param_wheel(bool use_wheel, const M3D& cov, const V3D& init_pos) {
-        USE_WHEEL = use_wheel;
+    void set_param_wheel(const M3D& cov, const V3D& init_pos) {
         cov_wheel_nhc = cov;
         pos_wheel = init_pos;
     }
+
+    // gnss
+    bool gnss_heading_need_init_ = true;
+    M3D GNSS_Heading{Eye3d};
 
 private:
     void IMU_init(const MeasureGroup& meas, esekfom::esekf& kf_state, int& N);

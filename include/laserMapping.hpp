@@ -10,6 +10,8 @@
 #include <mutex>
 #include <omp.h>
 
+#include <GeographicLib/LocalCartesian.hpp>
+#include <sensor_msgs/msg/nav_sat_fix.hpp>
 #include "IMU_Processing.hpp"
 #include "preprocess.h"
 
@@ -48,7 +50,7 @@ public:
 
     std::string lid_topic, imu_topic;
 
-    double last_timestamp_lidar = 0, last_timestamp_imu = -1.0, last_timestamp_wheel = 0;
+    double last_timestamp_lidar = 0, last_timestamp_imu = -1.0, last_timestamp_wheel = 0, last_timestamp_gnss = -1.0;
     double gyr_cov = 0.1, acc_cov = 0.1, b_gyr_cov = 0.0001, b_acc_cov = 0.0001;
     double cube_len = 0, lidar_end_time = 0, first_lidar_time = 0.0;
     int feats_down_size = 0;
@@ -58,21 +60,28 @@ public:
 
     std::vector<BoxPointType> cub_needrm;
     std::vector<PointVector> Nearest_Points;
-    std::vector<double> extrinT{3, 0.0};
-    std::vector<double> extrinR{9, 0.0};
     std::deque<double> time_buffer;
     std::deque<PointCloudXYZI::Ptr> lidar_buffer;
     std::deque<sensor_msgs::msg::Imu::ConstSharedPtr> imu_buffer;
     std::deque<nav_msgs::msg::Odometry::ConstSharedPtr> wheel_buffer;
+    std::deque<nav_msgs::msg::Odometry::ConstSharedPtr> gnss_buffer;
 
     // wheel
     bool USE_WHEEL = false;
     std::string wheel_topic;
     double wheel_cov = 0.01;
-    std::vector<double> extrinT_wheel{3, 0.0};
-    std::vector<double> extrinR_wheel{9, 0.0};
     M3D Wheel_R_wrt_IMU{Eye3d};
     V3D Wheel_T_wrt_IMU{Zero3d};
+
+    // GPS
+    bool USE_GNSS = false;
+    std::string gnss_topic;
+    M3D Gnss_R_wrt_IMU{Eye3d};
+    V3D Gnss_T_wrt_IMU{Zero3d};
+    GeographicLib::LocalCartesian geo_converter;
+    // GnssProcess gnss_data;
+    // nav_msgs::msg::Path gps_path;
+    // geometry_msgs::Vector3 msg_gnss_cov;
 
     PointCloudXYZI::Ptr featsFromMap{new PointCloudXYZI()};
     PointCloudXYZI::Ptr feats_undistort{new PointCloudXYZI()};
@@ -138,6 +147,7 @@ private:
     rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr pubOdomAftMapped;
     rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr pubPath;
 
+    rclcpp::Subscription<sensor_msgs::msg::NavSatFix>::SharedPtr sub_gnss;
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr sub_wheel;
     rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr sub_imu;
     rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr sub_pcl_pc;
@@ -190,6 +200,7 @@ private:
     void livox_pcl_cbk(const livox_ros_driver2::msg::CustomMsg::UniquePtr msg);
     void imu_cbk(const sensor_msgs::msg::Imu::UniquePtr msg_in);
     void wheel_cbk(const nav_msgs::msg::Odometry::UniquePtr msg_in);
+    void gnss_cbk(const sensor_msgs::msg::NavSatFix::UniquePtr msg_in);
     double lidar_mean_scantime = 0.0;
     int scan_num = 0;
     bool sync_packages(MeasureGroup& meas);

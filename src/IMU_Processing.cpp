@@ -1,5 +1,7 @@
 #include "IMU_Processing.hpp"
+#include "common_lib.h"
 #include <Eigen/src/Core/Matrix.h>
+#include <geometry_msgs/msg/detail/twist_with_covariance__struct.hpp>
 
 ImuProcess::ImuProcess() : b_first_frame_(true), imu_need_init_(true), start_timestamp_(-1) {
     init_iter_num = 1;                           // 初始化迭代次数
@@ -164,7 +166,7 @@ void ImuProcess::UndistortPcl(MeasureGroup& meas, esekfom::esekf& kf_state, Poin
         /*** update by wheel meas ***/
 
         static double last_wheel_time = 0;
-        if (USE_WHEEL && !meas.wheel.empty()) {
+        if (!meas.wheel.empty()) {
             // 掐头
             while (get_time_sec(meas.wheel.front()->header.stamp) < get_time_sec(head->header.stamp)) {
                 meas.wheel.pop_front();
@@ -194,6 +196,42 @@ void ImuProcess::UndistortPcl(MeasureGroup& meas, esekfom::esekf& kf_state, Poin
 #if 0
                 last_wheel_time = wheel_time;
 #endif
+            }
+        }
+
+        /*** update by gnss meas ***/
+        if (!meas.gnss.empty()) {
+            double gnss_time = get_time_sec(meas.gnss.front()->header.stamp);
+            if (gnss_time < get_time_sec(head->header.stamp)) {
+                meas.gnss.pop_front();
+            } else {
+                if (gnss_time < get_time_sec(tail->header.stamp)) {  // gnss位于两个imu之间
+
+                    // FIXME:GNSS init
+                    if (!gnss_heading_need_init_) {
+                        auto&& pose = meas.gnss.front()->pose;
+
+                        if (pose.covariance[0] < 200) {  // 航向初始化未完成或gnss水平噪声大于200不进行更新（遮挡区域）
+                            // covariance
+                            Eigen::Matrix3d gnss_cov = Eye3d;
+                            gnss_cov(0, 0) = 0.01 * pose.covariance[0];
+                            gnss_cov(1, 1) = 0.01 * pose.covariance[7];
+                            gnss_cov(2, 2) = pose.covariance[14];
+                            // pose
+                            V3D gnss_pos(pose.pose.position.x, pose.pose.position.y, pose.pose.position.z);
+                            V3D gnss_pos_2 = GNSS_Heading * gnss_pos;
+                            kf_state.update_iterated_dyn_share_gnss(gnss_cov, gnss_pos_2);
+
+                            std::cout << "gnss update :" << gnss_pos.transpose() << " -> " << gnss_pos_2.transpose() << std::endl;
+                        } else {
+                            std::cerr << "gnss too noise !" << std::endl;
+                        }
+                    } else {
+                        std::cerr << "gnss not initialized !" << std::endl;
+                    }
+
+                    meas.gnss.pop_front();
+                }
             }
         }
 
@@ -283,6 +321,26 @@ void ImuProcess::Process(MeasureGroup& meas, esekfom::esekf& kf_state, PointClou
         }
 
         return;
+    }
+
+    // FIXME:GNSS init
+    if (gnss_heading_need_init_) {
+        if (!meas.gnss.empty()) {
+            // Eigen::Vector3d gnss_pose(meas.gnss.back()->pose.pose.position.x, meas.gnss.back()->pose.pose.position.y, 0.0);
+            // state_ikfom init_state = kf_state.get_x();  // 初始状态量
+            // cout << "gnss norm " << gnss_pose.norm() << endl;
+            // if (gnss_pose.norm() > 5) {  // GNSS 水平位移大于5m
+            //     Eigen::Vector3d tmp_vec(init_state.pos.x(), init_state.pos.y(), 0.0);
+            //     GNSS_Heading = Eigen::Quaterniond::FromTwoVectors(gnss_pose, tmp_vec).toRotationMatrix();
+            //     // init_state.offset_R_G_I = GNSS_Heading;
+            //     // kf_state.change_x(init_state);
+            //     Eigen::Vector3d euler_angles = GNSS_Heading.eulerAngles(0, 1, 2);
+            //     std::cout << "GNSS_Heading: " << euler_angles(2) * 180.0 / 3.1415926 << std::endl;
+            // TODO:
+            GNSS_Heading = Eigen::AngleAxisd(-36.0 * M_PI / 180.0, Eigen::Vector3d::UnitZ()).matrix();
+            gnss_heading_need_init_ = false;
+            // }
+        }
     }
 
     UndistortPcl(meas, kf_state, *cur_pcl_un_);

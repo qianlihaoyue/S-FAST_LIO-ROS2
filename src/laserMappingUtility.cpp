@@ -48,6 +48,13 @@ void LaserMapping::readParameters() {
     declare_and_get_parameter<double>("mapping.b_acc_cov", b_acc_cov, 0.0001);  // IMU加速度计偏置的协方差
     declare_and_get_parameter<bool>("mapping.extrinsic_est_en", extrinsic_est_en, false);
 
+    std::vector<double> extrinT(3, 0.0);
+    std::vector<double> extrinR(9, 0.0);
+    declare_and_get_parameter<vector<double>>("mapping.extrinsic_T", extrinT, vector<double>(3, 0));  // 雷达相对于IMU的外参T（即雷达在IMU坐标系中的坐标）
+    declare_and_get_parameter<vector<double>>("mapping.extrinsic_R", extrinR, vector<double>(9, 0));  // 雷达相对于IMU的外参R
+    Lidar_T_wrt_IMU << VEC_FROM_ARRAY(extrinT);
+    Lidar_R_wrt_IMU << MAT_FROM_ARRAY(extrinR);
+
     declare_and_get_parameter<double>("preprocess.blind", p_pre->blind, 0.01);         // 最小距离阈值，即过滤掉0～blind范围内的点云
     declare_and_get_parameter<int>("preprocess.lidar_type", p_pre->lidar_type, AVIA);  // 激光雷达的类型
     declare_and_get_parameter<int>("preprocess.scan_line", p_pre->N_SCANS, 16);        // 激光雷达扫描的线数（livox avia为6线）
@@ -62,9 +69,18 @@ void LaserMapping::readParameters() {
 
     declare_and_get_parameter<bool>("wheel.use_wheel", USE_WHEEL, false);
     declare_and_get_parameter<string>("wheel.wheel_topic", wheel_topic, "/agv_connect/carOdometry");
-    declare_and_get_parameter<vector<double>>("wheel.extrinsic_T", extrinT_wheel, vector<double>());
-    declare_and_get_parameter<vector<double>>("wheel.extrinsic_R", extrinR_wheel, vector<double>());
     declare_and_get_parameter<double>("wheel.wheel_cov", wheel_cov, 0.01);
+    declare_and_get_parameter<vector<double>>("wheel.extrinsic_T", extrinT, vector<double>(3, 0));
+    declare_and_get_parameter<vector<double>>("wheel.extrinsic_R", extrinR, vector<double>(9, 0));
+    Wheel_T_wrt_IMU << VEC_FROM_ARRAY(extrinT);
+    Wheel_R_wrt_IMU << MAT_FROM_ARRAY(extrinR);
+
+    declare_and_get_parameter<bool>("gnss.use_gnss", USE_GNSS, false);
+    declare_and_get_parameter<string>("gnss.gnss_topic", gnss_topic, "/gps/fix");
+    declare_and_get_parameter<vector<double>>("gnss.extrinsic_T", extrinT, vector<double>(3, 0));
+    declare_and_get_parameter<vector<double>>("gnss.extrinsic_R", extrinR, vector<double>(9, 0));
+    Gnss_T_wrt_IMU << VEC_FROM_ARRAY(extrinT);
+    Gnss_R_wrt_IMU << MAT_FROM_ARRAY(extrinR);
 
     createDirectoryIfNotExists(savemap_dir);
     fp = fopen((savemap_dir + "/pos_log.csv").c_str(), "w");
@@ -72,9 +88,6 @@ void LaserMapping::readParameters() {
     fout_traj.open(savemap_dir + "/traj_tum.txt", std::ios::out);
     fout_traj.setf(std::ios::fixed, std::ios::floatfield);
     fout_traj.precision(6);
-
-    declare_and_get_parameter<vector<double>>("mapping.extrinsic_T", extrinT, vector<double>());  // 雷达相对于IMU的外参T（即雷达在IMU坐标系中的坐标）
-    declare_and_get_parameter<vector<double>>("mapping.extrinsic_R", extrinR, vector<double>());  // 雷达相对于IMU的外参R
 
     std::cout << "Lidar_type: " << p_pre->lidar_type << std::endl;
 }
@@ -168,6 +181,66 @@ void LaserMapping::wheel_cbk(const nav_msgs::msg::Odometry::UniquePtr msg_in) {
     // sig_buffer.notify_all();
 }
 
+void LaserMapping::gnss_cbk(const sensor_msgs::msg::NavSatFix::UniquePtr msg_in) {
+    static bool gnss_inited = false;
+    double timestamp = get_time_sec(msg_in->header.stamp);
+
+    mtx_buffer.lock();
+    // 没有进行时间纠正
+    if (timestamp < last_timestamp_gnss) {
+        std::cerr << "gnss loop back, clear buffer" << std::endl;
+        gnss_buffer.clear();
+    }
+    mtx_buffer.unlock();
+
+    last_timestamp_gnss = timestamp;
+
+    if (!gnss_inited) {  //  初始化位置
+        geo_converter.Reset(msg_in->latitude, msg_in->longitude, msg_in->altitude);
+        gnss_inited = true;
+    } else {
+        double local_E = 0, local_N = 0, local_U = 0;  // WGS84 -> ENU
+        geo_converter.Forward(msg_in->latitude, msg_in->longitude, msg_in->altitude, local_E, local_N, local_U);
+
+        V3D gnss_pose(local_E, local_N, local_U);
+        gnss_pose = Gnss_R_wrt_IMU.transpose() * (gnss_pose - Gnss_T_wrt_IMU);  // convert gnss_pose to IMU frame
+
+        nav_msgs::msg::Odometry::SharedPtr gnss_data_enu(new nav_msgs::msg::Odometry());
+        gnss_data_enu->header.stamp = msg_in->header.stamp;  // rclcpp::Time(timestamp * 1e9);
+        gnss_data_enu->pose.pose.position.x = gnss_pose(0);  // 东
+        gnss_data_enu->pose.pose.position.y = gnss_pose(1);  // 北
+        gnss_data_enu->pose.pose.position.z = gnss_pose(2);  // 天
+
+        gnss_data_enu->pose.covariance[0] = msg_in->position_covariance[0];
+        gnss_data_enu->pose.covariance[7] = msg_in->position_covariance[4];
+        gnss_data_enu->pose.covariance[14] = msg_in->position_covariance[8];
+
+        gnss_buffer.push_back(gnss_data_enu);
+
+        //  gnss 的姿态不可观，所以姿态只用于可视化，取自imu
+        // auto geoQuat = kf.get_x().rot.unit_quaternion();
+
+        // convert ROS NavSatFix to GeographicLib compatible GNSS message:
+        // gnss_data.time = timestamp;
+        // gnss_data.status = msg_in->status.status;
+        // gnss_data.service = msg_in->status.service;
+        // gnss_data.pose_cov[0] = msg_in->position_covariance[0];
+        // gnss_data.pose_cov[1] = msg_in->position_covariance[4];
+        // gnss_data.pose_cov[2] = msg_in->position_covariance[8];
+
+        // // visual gnss path in rviz:
+        // msg_gnss_pose.header.frame_id = "camera_init";
+        // msg_gnss_pose.header.stamp = rclcpp::Time(gnss_data.time * 1e9);
+        // Eigen::Vector3d gnss_vec(gnss_pose(0, 3), gnss_pose(1, 3), gnss_pose(2, 3));
+        // gnss_vec = GNSS_Heading * gnss_vec;
+        // msg_gnss_pose.pose.position.x = gnss_vec.x();
+        // gps_path.poses.push_back(msg_gnss_pose);
+
+        // msg_gnss_cov.x = gnss_data.pose_cov[0];
+        // pubGnssCov->publish(msg_gnss_cov);
+    }
+}
+
 // 把当前要处理的LIDAR和IMU数据打包到meas
 bool LaserMapping::sync_packages(MeasureGroup& meas) {
     if (lidar_buffer.empty() || imu_buffer.empty()) return false;
@@ -216,6 +289,19 @@ bool LaserMapping::sync_packages(MeasureGroup& meas) {
             if (wheel_time > lidar_end_time) break;
             meas.wheel.push_back(wheel_buffer.front());  // 记录当前lidar帧内的wheel数据到meas.wheel
             wheel_buffer.pop_front();
+        }
+    }
+
+    /*** find the closet gnss frame to the last imu frame ***/
+    if (USE_GNSS && !gnss_buffer.empty()) {
+        meas.gnss.clear();
+        double gnss_time = get_time_sec(gnss_buffer.front()->header.stamp);
+        // 记录gnss数据，gnss时间小于当前帧lidar结束时间
+        while ((!gnss_buffer.empty()) && (gnss_time < lidar_end_time)) {
+            gnss_time = get_time_sec(gnss_buffer.front()->header.stamp);
+            if (gnss_time > lidar_end_time) break;
+            meas.gnss.push_back(gnss_buffer.front());  // 记录当前lidar帧内的gnss数据到meas.gnss
+            gnss_buffer.pop_front();
         }
     }
 

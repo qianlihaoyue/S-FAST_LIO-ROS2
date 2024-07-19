@@ -45,6 +45,7 @@ struct MeasureGroup  // Lidar data and imu dates for the current process
     PointCloudXYZI::Ptr lidar;
     std::deque<sensor_msgs::msg::Imu::ConstSharedPtr> imu;
     std::deque<nav_msgs::msg::Odometry::ConstSharedPtr> wheel;
+    std::deque<nav_msgs::msg::Odometry::ConstSharedPtr> gnss;
 };
 
 template <typename T>

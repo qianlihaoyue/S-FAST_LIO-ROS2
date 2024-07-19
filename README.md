@@ -15,7 +15,7 @@
 - branch - wheel
 
 - b1.0 - 7.17 - add wheel
-
+- b1.1 - 7.19 - add GNSS, 存在bug，即GPS Heading朝向问题
 
 
 ## Simplified Implementation of FAST_LIO
