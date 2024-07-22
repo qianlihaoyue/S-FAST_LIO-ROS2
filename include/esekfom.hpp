@@ -4,8 +4,9 @@
 #include "ikd-Tree/ikd_Tree.h"
 #include "use-ikfom.hpp"
 #include <Eigen/Dense>
-#include <geometry_msgs/msg/detail/pose_with_covariance__struct.hpp>
-#include <nav_msgs/msg/detail/odometry__struct.hpp>
+#include <functional>
+// #include <geometry_msgs/msg/detail/pose_with_covariance__struct.hpp>
+// #include <nav_msgs/msg/detail/odometry__struct.hpp>
 
 // 该hpp主要包含：广义加减法，前向传播主函数，计算特征点残差及其雅可比，ESKF主函数
 
@@ -322,33 +323,8 @@ public:
         }
     }
 
-    // Wheel
-    Eigen::Matrix3d Wheel_R_wrt_IMU;
-    const double wheel_s = 1;
-
-    void h_share_model_wheel(dyn_share_datastruct& ekfom_data, V3D wheel_v_vec) {
-        ekfom_data.h_x = Eigen::MatrixXd::Zero(3, 33);
-        ekfom_data.h.resize(3);
-
-        // residual
-        // V3D res = wheel_v_vec * wheel_s - R_I_W * (rotT * x_.vel + angv_crossmat * offset_T_W_I);
-        V3D res = x_.vel - Wheel_R_wrt_IMU * x_.rot.matrix() * wheel_v_vec * wheel_s;
-        ekfom_data.h = -res;
-
-        // ekfom_data.h(0) = 0 - res.x();  // TIPS: 此处修改为负
-        // ekfom_data.h(1) = 0 - res.y();
-        // ekfom_data.h(2) = 0 - res.z();
-
-        // jacobian
-        M3D rot_crossmat;
-        rot_crossmat << SKEW_SYM_MATRX((x_.rot.matrix() * wheel_v_vec));    // 当前状态imu系下 点坐标反对称矩阵
-        ekfom_data.h_x.block<3, 3>(0, 3) = Wheel_R_wrt_IMU * rot_crossmat;  // diff w.r.t. rot
-        ekfom_data.h_x.block<3, 3>(0, 12) = Eye3d;                          // diff w.r.t. vel
-
-        // ekfom_data.R = Eye3d * wheel_cov; // covariance
-    }
-
-    void update_iterated_dyn_share_wheel(const M3D& R, V3D wheel_v_vec) {
+    template <typename ValueType>
+    void update_iterated_dyn_share_template(std::function<void(dyn_share_datastruct&, const ValueType&)> h_share_model, const M3D& R, const ValueType& args) {
         dyn_share_datastruct dyn_share;
 
         int t = 0;
@@ -359,7 +335,7 @@ public:
         auto I = Eigen::Matrix<double, 24, 24>::Identity();
 
         for (int i = -1; i < maximum_iter; i++) {
-            h_share_model_wheel(dyn_share, wheel_v_vec);
+            h_share_model(dyn_share, args);
 
             vectorized_state dx_new = boxminus(x_, x_propagated);
 
@@ -386,9 +362,32 @@ public:
             }
         }
     }
+    // Wheel
+    Eigen::Matrix3d Wheel_R_wrt_IMU;
+    const double wheel_s = 1;
+
+    void h_share_model_wheel(dyn_share_datastruct& ekfom_data, V3D wheel_v_vec) {
+        ekfom_data.h_x = Eigen::MatrixXd::Zero(3, 24);
+        ekfom_data.h.resize(3);
+
+        // residual
+        // V3D res = wheel_v_vec * wheel_s - R_I_W * (rotT * x_.vel + angv_crossmat * offset_T_W_I);
+        V3D res = x_.vel - Wheel_R_wrt_IMU * x_.rot.matrix() * wheel_v_vec * wheel_s;
+        ekfom_data.h = -res;
+
+        // jacobian
+        M3D rot_crossmat;
+        rot_crossmat << SKEW_SYM_MATRX((x_.rot.matrix() * wheel_v_vec));    // 当前状态imu系下 点坐标反对称矩阵
+        ekfom_data.h_x.block<3, 3>(0, 3) = Wheel_R_wrt_IMU * rot_crossmat;  // diff w.r.t. rot
+        ekfom_data.h_x.block<3, 3>(0, 12) = Eye3d;                          // diff w.r.t. vel
+    }
+
+    void update_iterated_dyn_share_wheel(const M3D& R, const V3D& wheel_v_vec) {
+        update_iterated_dyn_share_template<V3D>([&](auto& dyn_share, const V3D& vec) { h_share_model_wheel(dyn_share, vec); }, R, wheel_v_vec);
+    }
 
     void h_share_model_gnss(dyn_share_datastruct& ekfom_data, const V3D& gnss_pos) {
-        ekfom_data.h_x = Eigen::MatrixXd::Zero(3, 33);
+        ekfom_data.h_x = Eigen::MatrixXd::Zero(3, 24);
         ekfom_data.h.resize(3);
 
         // residual (estimate heading)
@@ -410,42 +409,29 @@ public:
     }
 
     void update_iterated_dyn_share_gnss(const M3D& R, const V3D& gnss_pos) {
-        dyn_share_datastruct dyn_share;
+        update_iterated_dyn_share_template<V3D>([&](auto& dyn_share, const V3D& pos) { h_share_model_gnss(dyn_share, pos); }, R, gnss_pos);
+    }
 
-        int t = 0;
-        state_ikfom x_propagated = x_;  // 这里的x_和P_分别是经过正向传播后的状态量和协方差矩阵，因为会先调用predict函数再调用这个函数
+    void h_share_model_car(dyn_share_datastruct& ekfom_data, bool unuse = true) {
+        ekfom_data.h_x = Eigen::MatrixXd::Zero(3, 24);
+        ekfom_data.h.resize(3);
 
-        Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic> K;  // DIM * 3
-        Eigen::Matrix<double, 24, 1> dx_;                         // DIM * 1
-        auto I = Eigen::Matrix<double, 24, 24>::Identity();
+        // residual
+        V3D wheel_v_vec = x_.rot.matrix().transpose() * x_.vel;  // 将当前速度转到车体
+        std::cout << "vel:" << wheel_v_vec.transpose() << std::endl;
+        wheel_v_vec(1) = wheel_v_vec(2) = 0;               // 然后令vel yz为0
+        V3D res = x_.vel - x_.rot.matrix() * wheel_v_vec;  // 重新转回imu坐标系，作差
+        ekfom_data.h = -res;
 
-        for (int i = -1; i < maximum_iter; i++) {
-            h_share_model_gnss(dyn_share, gnss_pos);
+        // jacobian
+        M3D rot_crossmat;
+        rot_crossmat << SKEW_SYM_MATRX((x_.rot.matrix() * wheel_v_vec));  // 当前状态imu系下 点坐标反对称矩阵
+        ekfom_data.h_x.block<3, 3>(0, 3) = rot_crossmat;                  // diff w.r.t. rot
+        ekfom_data.h_x.block<3, 3>(0, 12) = Eye3d;                        // diff w.r.t. vel
+    }
 
-            vectorized_state dx_new = boxminus(x_, x_propagated);
-
-            auto H = dyn_share.h_x;
-            K = P_ * H.transpose() * (H * P_ * H.transpose() + R).inverse();
-            dx_ = K * dyn_share.h + (K * H - I) * dx_new;
-            x_ = boxplus(x_, dx_);
-
-            dyn_share.converge = true;
-            for (int j = 0; j < 24; j++) {
-                if (std::fabs(dx_[j]) > epsi) {  // 如果dx>epsi 认为没有收敛
-                    dyn_share.converge = false;
-                    break;
-                }
-            }
-
-            if (dyn_share.converge) t++;
-
-            if (!t && i == maximum_iter - 2) dyn_share.converge = true;
-
-            if (t > 0 || i == maximum_iter - 1) {
-                P_ = (I - K * H) * P_;  // 公式(19)
-                return;
-            }
-        }
+    void update_iterated_dyn_share_car(const M3D& R) {
+        update_iterated_dyn_share_template<bool>([&](auto& dyn_share, const bool& unuse) { h_share_model_car(dyn_share, unuse); }, R, true);
     }
 
 private:

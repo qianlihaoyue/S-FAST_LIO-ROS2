@@ -16,6 +16,7 @@
 
 - b1.0 - 7.17 - add wheel
 - b1.1 - 7.19 - add GNSS, 存在bug，即GPS Heading朝向问题
+- b1.2 - 7.22 - add 车辆模型约束，即限制yz轴速度为0，封装update_iterated_dyn_share_template（unchecked）
 
 
 ## Simplified Implementation of FAST_LIO
