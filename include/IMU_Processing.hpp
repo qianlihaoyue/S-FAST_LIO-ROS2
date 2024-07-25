@@ -40,8 +40,8 @@ public:
     }
 
     // gnss
-    bool gnss_heading_need_init_ = true;
-    M3D GNSS_Heading{Eye3d};
+    geometry_msgs::msg::PoseWithCovariance gps_pos;
+    
 
 private:
     void IMU_init(const MeasureGroup& meas, esekfom::esekf& kf_state, int& N);

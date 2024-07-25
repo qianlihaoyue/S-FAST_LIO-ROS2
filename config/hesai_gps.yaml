@@ -6,33 +6,30 @@
             time_sync_en: false         # ONLY turn on when external time synchronization is really not possible
             time_offset_lidar_to_imu: 0.0  
 
-            filter_size_surf: 1.5
-            filter_size_map: 1.25
-            cube_len: 100.0
+            filter_size_surf: 2.0
+            filter_size_map: 1.0
+            # cube_len: 100.0
 
         gnss:
-            use_gnss: true
+            use_gnss: false
             gnss_topic: "/gps_driver/gps_data"
-            extrinsic_T: [  -0.42, 0.53, 0.0]
-            extrinsic_R: [  1.0, 0.0, 0.0, 
-                            0.0, 1.0, 0.0, 
-                            0.0, 0.0, 1.0]
-            # extrinsic_R: [  0.8131008, -0.5821230,  0.0000000,
-            #                 0.5821230,  0.8131008,  0.0000000,
-            #                 0.0000000,  0.0000000,  1.0000000]
-            HeadAngle: 36
+            # extrinsic_T: [  -0.42, 0.53, 0.0]
+            # extrinsic_R: [  1.0, 0.0, 0.0, 
+            #                 0.0, 1.0, 0.0, 
+            #                 0.0, 0.0, 1.0]
 
         kf:
             maximum_iter: 4
             epsi: 0.001
             NUM_MATCH_POINTS: 5
             plane_thr: 0.1
+            use_car: false
 
         preprocess:
             lidar_type: 4                # 1 for Livox serials LiDAR, 2 for Velodyne LiDAR, 3 for ouster LiDAR, 
             scan_line: 16
             blind: 2.0
-            point_filter_num: 1
+            point_filter_num: 10
 
         mapping:
             acc_cov: 0.1

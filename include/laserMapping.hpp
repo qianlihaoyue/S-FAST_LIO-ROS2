@@ -76,12 +76,9 @@ public:
     // GPS
     bool USE_GNSS = false;
     std::string gnss_topic;
-    M3D Gnss_R_wrt_IMU{Eye3d};
-    V3D Gnss_T_wrt_IMU{Zero3d};
+    // M3D Gnss_R_wrt_IMU{Eye3d};
+    // V3D Gnss_T_wrt_IMU{Zero3d};
     GeographicLib::LocalCartesian geo_converter;
-    // GnssProcess gnss_data;
-    // nav_msgs::msg::Path gps_path;
-    // geometry_msgs::Vector3 msg_gnss_cov;
 
     PointCloudXYZI::Ptr featsFromMap{new PointCloudXYZI()};
     PointCloudXYZI::Ptr feats_undistort{new PointCloudXYZI()};

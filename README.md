@@ -17,6 +17,7 @@
 - b1.0 - 7.17 - add wheel
 - b1.1 - 7.19 - add GNSS, 存在bug，即GPS Heading朝向问题
 - b1.2 - 7.22 - add 车辆模型约束，即限制yz轴速度为0，封装update_iterated_dyn_share_template（unchecked）
+- b1.3 - 7.25 - GPS offset_R_G_I 加入状态量中进行优化
 
 
 ## Simplified Implementation of FAST_LIO
@@ -71,6 +72,8 @@ sudo make install
 
 
 ## 7. Acknowledgements
-Thanks for the authors of [FAST-LIO](https://github.com/hku-mars/FAST_LIO).
+- [FAST-LIO](https://github.com/hku-mars/FAST_LIO)
+
+- [S-FAST_LIO](https://github.com/zlwang7/S-FAST_LIO)
 
 - [FAST-LIO-Multi-Sensor-Fusion](https://github.com/zhh2005757/FAST-LIO-Multi-Sensor-Fusion)

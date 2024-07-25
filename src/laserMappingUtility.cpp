@@ -77,10 +77,12 @@ void LaserMapping::readParameters() {
 
     declare_and_get_parameter<bool>("gnss.use_gnss", USE_GNSS, false);
     declare_and_get_parameter<string>("gnss.gnss_topic", gnss_topic, "/gps/fix");
-    declare_and_get_parameter<vector<double>>("gnss.extrinsic_T", extrinT, vector<double>(3, 0));
-    declare_and_get_parameter<vector<double>>("gnss.extrinsic_R", extrinR, vector<double>(9, 0));
-    Gnss_T_wrt_IMU << VEC_FROM_ARRAY(extrinT);
-    Gnss_R_wrt_IMU << MAT_FROM_ARRAY(extrinR);
+    // declare_and_get_parameter<vector<double>>("gnss.extrinsic_T", extrinT, vector<double>(3, 0));
+    // declare_and_get_parameter<vector<double>>("gnss.extrinsic_R", extrinR, vector<double>(9, 0));
+    // Gnss_T_wrt_IMU << VEC_FROM_ARRAY(extrinT);
+    // Gnss_R_wrt_IMU << MAT_FROM_ARRAY(extrinR);
+
+    declare_and_get_parameter<bool>("kf.use_car", kf.USE_CAR, false);
 
     createDirectoryIfNotExists(savemap_dir);
     fp = fopen((savemap_dir + "/pos_log.csv").c_str(), "w");
@@ -203,7 +205,7 @@ void LaserMapping::gnss_cbk(const sensor_msgs::msg::NavSatFix::UniquePtr msg_in)
         geo_converter.Forward(msg_in->latitude, msg_in->longitude, msg_in->altitude, local_E, local_N, local_U);
 
         V3D gnss_pose(local_E, local_N, local_U);
-        gnss_pose = Gnss_R_wrt_IMU.transpose() * (gnss_pose - Gnss_T_wrt_IMU);  // convert gnss_pose to IMU frame
+        // gnss_pose = Gnss_R_wrt_IMU.transpose() * (gnss_pose - Gnss_T_wrt_IMU);  // convert gnss_pose to IMU frame
 
         nav_msgs::msg::Odometry::SharedPtr gnss_data_enu(new nav_msgs::msg::Odometry());
         gnss_data_enu->header.stamp = msg_in->header.stamp;  // rclcpp::Time(timestamp * 1e9);
@@ -211,9 +213,8 @@ void LaserMapping::gnss_cbk(const sensor_msgs::msg::NavSatFix::UniquePtr msg_in)
         gnss_data_enu->pose.pose.position.y = gnss_pose(1);  // 北
         gnss_data_enu->pose.pose.position.z = gnss_pose(2);  // 天
 
-        gnss_data_enu->pose.covariance[0] = msg_in->position_covariance[0];
-        gnss_data_enu->pose.covariance[7] = msg_in->position_covariance[4];
-        gnss_data_enu->pose.covariance[14] = msg_in->position_covariance[8];
+        gnss_data_enu->pose.covariance[0] = msg_in->position_covariance[0];  // Heading
+        gnss_data_enu->pose.covariance[4] = msg_in->status.status;           // 状态
 
         gnss_buffer.push_back(gnss_data_enu);
 
@@ -460,17 +461,30 @@ void LaserMapping::dump_lio_state_to_log(FILE* fp) {
     fprintf(fp, "%lf ,", Measures.lidar_beg_time - first_lidar_time);
     fprintf(fp, "%lf ,%lf ,%lf ,", rot_ang(0), rot_ang(1), rot_ang(2));  // Angle
     fprintf(fp, "%lf ,%lf ,%lf ,", x_.pos(0), x_.pos(1), x_.pos(2));     // Pos
+    fprintf(fp, "%lf ,%lf ,%lf ,", x_.vel(0), x_.vel(1), x_.vel(2));     // Vel
 
-    auto pos_w2imu = Wheel_R_wrt_IMU * p_imu->pos_wheel + Wheel_T_wrt_IMU;
+    fprintf(fp, "  - ,");
+    double gps_heading = p_imu->gps_pos.covariance[0];  // GPS Heading + 90 = 原始车头的Heading -  当前角度 = 应该旋转的角度
+    int status = p_imu->gps_pos.covariance[4];
+    auto&& position = p_imu->gps_pos.pose.position;
+    V3D gnss_pos(position.x, position.y, position.z);
+    auto pos_w2imu = x_.offset_R_G_I.matrix() * gnss_pos;
     fprintf(fp, "%lf ,%lf ,%lf ,", pos_w2imu(0), pos_w2imu(1), pos_w2imu(2));  // Pos
 
+    // fprintf(fp, "  - ,");
+    // fprintf(fp, "%lf ,%lf ,%lf ,", p_imu->gnss_pos(0), p_imu->gnss_pos(1), p_imu->gnss_pos(2));  // Pos
+
+    fprintf(fp, "  - ,");
+    rot_ang = x_.offset_R_G_I.matrix().eulerAngles(0, 1, 2);
+
+    fprintf(fp, "%lf ,%lf ,", gps_heading, RAD2DEG(rot_ang(2)));
+    if (status != 4) fprintf(fp, "%lf ,", (double)status);
+
     // Debug
-    fprintf(fp, "%d ,%d , - ,", feats_down_size, (int)(kf.get_match_ratio() * 100));
+    // fprintf(fp, "%d ,%d , - ,", feats_down_size, (int)(kf.get_match_ratio() * 100));
 
-    fprintf(fp, "%lf ,%lf ,%lf ,", x_.vel(0), x_.vel(1), x_.vel(2));  // Vel
-
-    Eigen::Vector3d transformed_velocity = Wheel_R_wrt_IMU * x_.rot.matrix() * p_imu->wheel_velocity;
-    fprintf(fp, "%lf ,%lf ,%lf ,", p_imu->wheel_velocity.x(), transformed_velocity.x(), transformed_velocity.y());  // Vel
+    // Eigen::Vector3d transformed_velocity = Wheel_R_wrt_IMU * x_.rot.matrix() * p_imu->wheel_velocity;
+    // fprintf(fp, "%lf ,%lf ,%lf ,", p_imu->wheel_velocity.x(), transformed_velocity.x(), transformed_velocity.y());  // Vel
 
     // fprintf(fp, "%lf ,%lf ,%lf ,", x_.bg(0), x_.bg(1), x_.bg(2));       // Bias_g
     // fprintf(fp, "%lf ,%lf ,%lf ,", x_.ba(0), x_.ba(1), x_.ba(2));       // Bias_a

@@ -94,12 +94,13 @@ void ImuProcess::IMU_init(const MeasureGroup& meas, esekfom::esekf& kf_state, in
 
     kf_state.change_x(init_state);  // 将初始化后的状态传入esekfom.hpp中的x_
 
-    Eigen::Matrix<double, 24, 24> init_P = Eigen::MatrixXd::Identity(24, 24);  // 在esekfom.hpp获得P_的协方差矩阵
+    Eigen::Matrix<double, STATE_DIM, STATE_DIM> init_P = Eigen::MatrixXd::Identity(STATE_DIM, STATE_DIM);  // 在esekfom.hpp获得P_的协方差矩阵
     init_P(6, 6) = init_P(7, 7) = init_P(8, 8) = 0.00001;
     init_P(9, 9) = init_P(10, 10) = init_P(11, 11) = 0.00001;
     init_P(15, 15) = init_P(16, 16) = init_P(17, 17) = 0.0001;
     init_P(18, 18) = init_P(19, 19) = init_P(20, 20) = 0.001;
     init_P(21, 21) = init_P(22, 22) = init_P(23, 23) = 0.00001;
+    init_P(24, 24) = init_P(25, 25) = init_P(26, 26) = 0.0001;  // GNSS_Heading
     kf_state.change_P(init_P);
     last_imu_ = meas.imu.back();
 
@@ -168,7 +169,7 @@ void ImuProcess::UndistortPcl(MeasureGroup& meas, esekfom::esekf& kf_state, Poin
         static double last_wheel_time = 0;
         if (!meas.wheel.empty()) {
             // 掐头
-            while (get_time_sec(meas.wheel.front()->header.stamp) < get_time_sec(head->header.stamp)) {
+            while (meas.wheel.size() && get_time_sec(meas.wheel.front()->header.stamp) < get_time_sec(head->header.stamp)) {
                 meas.wheel.pop_front();
             }
 
@@ -200,38 +201,47 @@ void ImuProcess::UndistortPcl(MeasureGroup& meas, esekfom::esekf& kf_state, Poin
         }
 
         /*** update by gnss meas ***/
+        static bool gnss_heading_need_init_ = true;
+
         if (!meas.gnss.empty()) {
-            double gnss_time = get_time_sec(meas.gnss.front()->header.stamp);
-            if (gnss_time < get_time_sec(head->header.stamp)) {
+            while (meas.gnss.size() && get_time_sec(meas.gnss.front()->header.stamp) < get_time_sec(head->header.stamp)) {
                 meas.gnss.pop_front();
-            } else {
-                if (gnss_time < get_time_sec(tail->header.stamp)) {  // gnss位于两个imu之间
+            }
+            // gnss位于两个imu之间
+            if (meas.gnss.size() && get_time_sec(meas.gnss.front()->header.stamp) < get_time_sec(tail->header.stamp)) {
+                gps_pos = meas.gnss.front()->pose;
+                double gps_heading = gps_pos.covariance[0];  // GPS Heading + 90 = 原始车头的Heading -  当前角度 = 应该旋转的角度
+                int status = gps_pos.covariance[4];
 
-                    // FIXME:GNSS init
-                    if (!gnss_heading_need_init_) {
-                        auto&& pose = meas.gnss.front()->pose;
+                // GNSS init
+                if (gnss_heading_need_init_ && status == 4) {
+                    state_ikfom init_state = kf_state.get_x();  // 初始状态量
 
-                        if (pose.covariance[0] < 200) {  // 航向初始化未完成或gnss水平噪声大于200不进行更新（遮挡区域）
-                            // covariance
-                            Eigen::Matrix3d gnss_cov = Eye3d;
-                            gnss_cov(0, 0) = 0.01 * pose.covariance[0];
-                            gnss_cov(1, 1) = 0.01 * pose.covariance[7];
-                            gnss_cov(2, 2) = pose.covariance[14];
-                            // pose
-                            V3D gnss_pos(pose.pose.position.x, pose.pose.position.y, pose.pose.position.z);
-                            V3D gnss_pos_2 = GNSS_Heading * gnss_pos;
-                            kf_state.update_iterated_dyn_share_gnss(gnss_cov, gnss_pos_2);
+                    double rot_yaw = init_state.rot.matrix().eulerAngles(0, 1, 2)(2);
+                    init_state.offset_R_G_I = Sophus::SO3(Eigen::AngleAxisd(DEG2RAD(gps_heading + 90) + rot_yaw, Eigen::Vector3d::UnitZ()).matrix());
+                    // init_state.offset_R_G_I =
+                    //     Sophus::SO3(Eigen::AngleAxisd(DEG2RAD(gps_heading + 90), Eigen::Vector3d::UnitZ()).matrix() * init_state.rot.matrix());
 
-                            std::cout << "gnss update :" << gnss_pos.transpose() << " -> " << gnss_pos_2.transpose() << std::endl;
-                        } else {
-                            std::cerr << "gnss too noise !" << std::endl;
-                        }
+                    kf_state.change_x(init_state);
+
+                    std::cout << "GNSS Initial Done :" << gps_heading + 90 + RAD2DEG(rot_yaw) << std::endl;
+                    gnss_heading_need_init_ = false;
+
+                } else {
+                    // covariance
+                    Eigen::Matrix3d gnss_cov = Eye3d;  // 根据解的状态给值
+
+                    if (status == 4) {  // 固定解 Fixed
+                        gnss_cov(0, 0) = gnss_cov(1, 1) = 0.05;
+                        auto&& position = gps_pos.pose.position;
+                        kf_state.update_iterated_dyn_share_gnss(gnss_cov, V3D(position.x, position.y, position.z));
                     } else {
-                        std::cerr << "gnss not initialized !" << std::endl;
+                        std::cout << "status: " << status << std::endl;
                     }
-
-                    meas.gnss.pop_front();
+                    // TODO:跳变检测
                 }
+
+                meas.gnss.pop_front();
             }
         }
 
@@ -321,26 +331,6 @@ void ImuProcess::Process(MeasureGroup& meas, esekfom::esekf& kf_state, PointClou
         }
 
         return;
-    }
-
-    // FIXME:GNSS init
-    if (gnss_heading_need_init_) {
-        if (!meas.gnss.empty()) {
-            // Eigen::Vector3d gnss_pose(meas.gnss.back()->pose.pose.position.x, meas.gnss.back()->pose.pose.position.y, 0.0);
-            // state_ikfom init_state = kf_state.get_x();  // 初始状态量
-            // cout << "gnss norm " << gnss_pose.norm() << endl;
-            // if (gnss_pose.norm() > 5) {  // GNSS 水平位移大于5m
-            //     Eigen::Vector3d tmp_vec(init_state.pos.x(), init_state.pos.y(), 0.0);
-            //     GNSS_Heading = Eigen::Quaterniond::FromTwoVectors(gnss_pose, tmp_vec).toRotationMatrix();
-            //     // init_state.offset_R_G_I = GNSS_Heading;
-            //     // kf_state.change_x(init_state);
-            //     Eigen::Vector3d euler_angles = GNSS_Heading.eulerAngles(0, 1, 2);
-            //     std::cout << "GNSS_Heading: " << euler_angles(2) * 180.0 / 3.1415926 << std::endl;
-            // TODO:
-            GNSS_Heading = Eigen::AngleAxisd(-36.0 * M_PI / 180.0, Eigen::Vector3d::UnitZ()).matrix();
-            gnss_heading_need_init_ = false;
-            // }
-        }
     }
 
     UndistortPcl(meas, kf_state, *cur_pcl_un_);
