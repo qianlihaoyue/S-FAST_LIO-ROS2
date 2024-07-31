@@ -10,10 +10,14 @@ void LaserMapping::initLIO() {
                                                                               std::bind(&LaserMapping::standard_pcl_cbk, this, std::placeholders::_1));
     }
     sub_imu = this->create_subscription<sensor_msgs::msg::Imu>(imu_topic, 10, std::bind(&LaserMapping::imu_cbk, this, std::placeholders::_1));
+    sub_wheel = this->create_subscription<nav_msgs::msg::Odometry>(wheel_topic, 10, std::bind(&LaserMapping::wheel_cbk, this, std::placeholders::_1));
+    sub_gnss = this->create_subscription<sensor_msgs::msg::NavSatFix>(gnss_topic, 10, std::bind(&LaserMapping::gnss_cbk, this, std::placeholders::_1));
+
     pubLaserCloudFull = this->create_publisher<sensor_msgs::msg::PointCloud2>("/cloud_registered", 20);
     pubLaserCloudFull_body = this->create_publisher<sensor_msgs::msg::PointCloud2>("/cloud_registered_body", 20);
     pubLaserCloudEffect = this->create_publisher<sensor_msgs::msg::PointCloud2>("/cloud_effected", 20);
     pubLaserCloudMap = this->create_publisher<sensor_msgs::msg::PointCloud2>("/Laser_map", 20);
+    pubLaserCloudFlash = this->create_publisher<sensor_msgs::msg::PointCloud2>("/cloudFlash", 20);
     pubOdomAftMapped = this->create_publisher<nav_msgs::msg::Odometry>("/Odometry", 20);
     pubPath = this->create_publisher<nav_msgs::msg::Path>("/path", 20);
     path.header.stamp = this->get_clock()->now();
@@ -27,8 +31,6 @@ void LaserMapping::initLIO() {
     downSizeFilterSurf.setLeafSize(filter_size_surf_min, filter_size_surf_min, filter_size_surf_min);
     // downSizeFilterMap.setLeafSize(filter_size_map_min, filter_size_map_min, filter_size_map_min);
 
-    Lidar_T_wrt_IMU << VEC_FROM_ARRAY(extrinT);
-    Lidar_R_wrt_IMU << MAT_FROM_ARRAY(extrinR);
     p_imu->set_param(Lidar_T_wrt_IMU, Lidar_R_wrt_IMU, V3D(gyr_cov, gyr_cov, gyr_cov), V3D(acc_cov, acc_cov, acc_cov), V3D(b_gyr_cov, b_gyr_cov, b_gyr_cov),
                      V3D(b_acc_cov, b_acc_cov, b_acc_cov));
 }
@@ -48,10 +50,11 @@ void LaserMapping::initLoc() {
         if (scan_pub_en) {
             PointVector().swap(ikdtree.PCL_Storage);
             ikdtree.flatten(ikdtree.Root_Node, ikdtree.PCL_Storage, NOT_RECORD);
-            featsFromMap->clear();
+            PointCloudXYZI::Ptr featsFromMap{new PointCloudXYZI()};
             featsFromMap->points = ikdtree.PCL_Storage;
             while (pubLaserCloudMap->get_subscription_count() == 0) std::this_thread::sleep_for(std::chrono::seconds(1));
-            publish_map(pubLaserCloudMap);
+            publish_cloud(pubLaserCloudMap, featsFromMap);
+            if (kf.USE_FLASH) publish_cloud(pubLaserCloudFlash, kf.cloudFlash);
         }
 
         declare_and_get_parameter<vector<double>>("loc.init_guess", init_guess, vector<double>());
@@ -159,8 +162,8 @@ void LaserMapping::map_incremental() {
             if (need_add)
                 PointToAdd.push_back(p_world);
             else if (pcd_save_en) {
-                // 只要最近点距离大于 filter_size_savemap
-                if (calc_dist(points_near[0], p_world) > filter_size_savemap) PointSave.push_back(p_world);
+                // 只要最近点距离大于 filter_size_savemap, 或者高强度点（反光条）
+                if (calc_dist(points_near[0], p_world) > filter_size_savemap || p_world.intensity > 100) PointSave.push_back(p_world);
             }
         } else {
             PointToAdd.push_back(p_world);
@@ -218,8 +221,19 @@ void LaserMapping::timer_callback() {
         // FIXME:
         if (false) lasermap_fov_segment();  // 更新localmap边界，然后降采样当前帧点云
 
+        PointCloudXYZI::Ptr cloud_flash(new PointCloudXYZI), cloud_norm(new PointCloudXYZI);
+        if (kf.USE_FLASH) {
+            for (auto& pt : feats_undistort->points) {
+                if (pt.intensity > kf.flash_thre)
+                    cloud_flash->points.push_back(pt);
+                else
+                    cloud_norm->points.push_back(pt);
+            }
+            *feats_undistort = std::move(*cloud_norm);
+        }
         downSizeFilterSurf.setInputCloud(feats_undistort);
         downSizeFilterSurf.filter(*feats_down_body);
+        if (kf.USE_FLASH) *feats_down_body += *cloud_flash;
         feats_down_size = feats_down_body->points.size();
         feats_down_world->resize(feats_down_size);
 
@@ -254,7 +268,15 @@ void LaserMapping::timer_callback() {
 
         /******* Publish points *******/
         if (path_en) publish_path(pubPath);
-        if (scan_pub_en || pcd_save_en) publish_frame_world(pubLaserCloudFull);
+        if (scan_pub_en || pcd_save_en) {
+            publish_frame_world(pubLaserCloudFull);
+
+            sensor_msgs::msg::PointCloud2 laserCloudmsg;
+            pcl::toROSMsg(*feats_undistort, laserCloudmsg);
+            laserCloudmsg.header.stamp = get_ros_time(lidar_end_time);
+            laserCloudmsg.header.frame_id = "body";
+            pubLaserCloudFull_body->publish(laserCloudmsg);
+        }
         publish_pca(kf.covariance_matrix);
 
         double t3 = omp_get_wtime();

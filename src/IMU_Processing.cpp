@@ -1,4 +1,5 @@
 #include "IMU_Processing.hpp"
+#include "common_lib.h"
 
 ImuProcess::ImuProcess() : b_first_frame_(true), imu_need_init_(true), start_timestamp_(-1) {
     init_iter_num = 1;                           // 初始化迭代次数
@@ -83,12 +84,13 @@ void ImuProcess::IMU_init(const MeasureGroup& meas, esekfom::esekf& kf_state, in
     init_state.offset_R_L_I = Sophus::SO3(Lidar_R_wrt_IMU);
     kf_state.change_x(init_state);  // 将初始化后的状态传入esekfom.hpp中的x_
 
-    Eigen::Matrix<double, 24, 24> init_P = Eigen::MatrixXd::Identity(24, 24);  // 在esekfom.hpp获得P_的协方差矩阵
+    Eigen::Matrix<double, STATE_DIM, STATE_DIM> init_P = Eigen::MatrixXd::Identity(STATE_DIM, STATE_DIM);  // 在esekfom.hpp获得P_的协方差矩阵
     init_P(6, 6) = init_P(7, 7) = init_P(8, 8) = 0.00001;
     init_P(9, 9) = init_P(10, 10) = init_P(11, 11) = 0.00001;
     init_P(15, 15) = init_P(16, 16) = init_P(17, 17) = 0.0001;
     init_P(18, 18) = init_P(19, 19) = init_P(20, 20) = 0.001;
     init_P(21, 21) = init_P(22, 22) = init_P(23, 23) = 0.00001;
+    init_P(24, 24) = init_P(25, 25) = init_P(26, 26) = 0.0001;  // GNSS_Heading
     kf_state.change_P(init_P);
     last_imu_ = meas.imu.back();
 
@@ -96,7 +98,7 @@ void ImuProcess::IMU_init(const MeasureGroup& meas, esekfom::esekf& kf_state, in
 }
 
 // 反向传播
-void ImuProcess::UndistortPcl(const MeasureGroup& meas, esekfom::esekf& kf_state, PointCloudXYZI& pcl_out) {
+void ImuProcess::UndistortPcl(MeasureGroup& meas, esekfom::esekf& kf_state, PointCloudXYZI& pcl_out) {
     /***将上一帧最后尾部的imu添加到当前帧头部的imu ***/
     auto v_imu = meas.imu;                                                  // 取出当前帧的IMU队列
     v_imu.push_front(last_imu_);                                            // 将上一帧最后尾部的imu添加到当前帧头部的imu
@@ -149,6 +151,71 @@ void ImuProcess::UndistortPcl(const MeasureGroup& meas, esekfom::esekf& kf_state
         Q.block<3, 3>(9, 9).diagonal() = cov_bias_acc;
 
         kf_state.predict(dt, Q, in);  // IMU前向传播，每次传播的时间间隔为dt
+
+        /*** update by wheel meas ***/
+
+        // static double last_wheel_time = 0;
+        if (!meas.wheel.empty()) {
+            // 掐头
+            while (meas.wheel.size() && get_time_sec(meas.wheel.front()->header.stamp) < get_time_sec(head->header.stamp)) {
+                meas.wheel.pop_front();
+            }
+
+            // wheel 位于两个imu之间
+            while (meas.wheel.size() && get_time_sec(meas.wheel.front()->header.stamp) < get_time_sec(tail->header.stamp)) {
+                auto&& wdata = meas.wheel.front()->twist.twist.linear;
+                wheel_velocity = Zero3d;
+                // 针对项目特化
+                (wdata.y) ? wheel_velocity(1) = wdata.x : wheel_velocity(0) = wdata.x;
+                // wheel_velocity << wdata.x, wdata.y, wdata.z;
+                kf_state.update_iterated_dyn_share_wheel(Eye3d * wheel_cov, wheel_velocity);  // wheel更新
+
+                meas.wheel.pop_front();
+            }
+        }
+
+        /*** update by gnss meas ***/
+        static bool gnss_heading_need_init_ = true;
+
+        if (!meas.gnss.empty()) {
+            while (meas.gnss.size() && get_time_sec(meas.gnss.front()->header.stamp) < get_time_sec(head->header.stamp)) {
+                meas.gnss.pop_front();
+            }
+            // gnss位于两个imu之间
+            if (meas.gnss.size() && get_time_sec(meas.gnss.front()->header.stamp) < get_time_sec(tail->header.stamp)) {
+                gps_pos = meas.gnss.front()->pose;
+                double gps_heading = gps_pos.covariance[0];  // GPS Heading + 90 = 原始车头的Heading -  当前角度 = 应该旋转的角度
+                int status = gps_pos.covariance[4];
+
+                // GNSS init
+                if (gnss_heading_need_init_ && status == 4) {
+                    state_ikfom init_state = kf_state.get_x();  // 初始状态量
+
+                    double rot_yaw = init_state.rot.matrix().eulerAngles(0, 1, 2)(2);
+                    // TODO: dataset: big - 90  add +90
+                    init_state.offset_R_G_I = Sophus::SO3(Eigen::AngleAxisd(DEG2RAD(gps_heading - 90) + rot_yaw, Eigen::Vector3d::UnitZ()).matrix());
+                    kf_state.change_x(init_state);
+
+                    std::cout << "GNSS Initial Done :" << gps_heading + 90 + RAD2DEG(rot_yaw) << std::endl;
+                    gnss_heading_need_init_ = false;
+
+                } else {
+                    // covariance
+                    Eigen::Matrix3d gnss_cov_mat = Eye3d;  // 根据解的状态给值
+
+                    if (status == 4) {  // 固定解 Fixed
+                        gnss_cov_mat(0, 0) = gnss_cov_mat(1, 1) = 0.05;
+                        auto&& position = gps_pos.pose.position;
+                        kf_state.update_iterated_dyn_share_gnss(gnss_cov_mat, V3D(position.x, position.y, position.z));
+                    } else {
+                        std::cout << "status: " << status << std::endl;
+                    }
+                    // TODO:跳变检测
+                }
+
+                meas.gnss.pop_front();
+            }
+        }
 
         imu_state = kf_state.get_x();  // 更新IMU状态为积分后的状态
         // 更新上一帧角速度 = 后一帧角速度-bias
@@ -211,7 +278,7 @@ void ImuProcess::UndistortPcl(const MeasureGroup& meas, esekfom::esekf& kf_state
     }
 }
 
-void ImuProcess::Process(const MeasureGroup& meas, esekfom::esekf& kf_state, PointCloudXYZI::Ptr& cur_pcl_un_) {
+void ImuProcess::Process(MeasureGroup& meas, esekfom::esekf& kf_state, PointCloudXYZI::Ptr& cur_pcl_un_) {
     if (meas.imu.empty()) return;
 
     assert(meas.lidar != nullptr);

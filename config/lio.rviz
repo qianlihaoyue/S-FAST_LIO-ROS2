@@ -5,6 +5,8 @@ Panels:
     Property Tree Widget:
       Expanded:
         - /Odometry1/Shape1
+        - /CloudEffected1
+        - /CloudMap1
       Splitter Ratio: 0.5
     Tree Height: 1586
   - Class: rviz_common/Selection
@@ -119,19 +121,19 @@ Visualization Manager:
       Class: rviz_default_plugins/PointCloud2
       Color: 255; 255; 255
       Color Transformer: Intensity
-      Decay Time: 0
-      Enabled: false
+      Decay Time: 100
+      Enabled: true
       Invert Rainbow: false
       Max Color: 255; 255; 255
-      Max Intensity: 184
+      Max Intensity: 9.330368041992188
       Min Color: 0; 0; 0
-      Min Intensity: 0
+      Min Intensity: 0.0003814697265625
       Name: CloudEffected
       Position Transformer: XYZ
       Selectable: true
-      Size (Pixels): 3
+      Size (Pixels): 1
       Size (m): 0.10000000149011612
-      Style: Flat Squares
+      Style: Points
       Topic:
         Depth: 5
         Durability Policy: Volatile
@@ -140,7 +142,7 @@ Visualization Manager:
         Value: /cloud_effected
       Use Fixed Frame: true
       Use rainbow: true
-      Value: false
+      Value: true
     - Alpha: 1
       Autocompute Intensity Bounds: true
       Autocompute Value Bounds:
@@ -151,18 +153,18 @@ Visualization Manager:
       Channel Name: intensity
       Class: rviz_default_plugins/PointCloud2
       Color: 255; 255; 255
-      Color Transformer: Intensity
-      Decay Time: 1000
+      Color Transformer: FlatColor
+      Decay Time: 0
       Enabled: true
       Invert Rainbow: false
       Max Color: 255; 255; 255
-      Max Intensity: 255
+      Max Intensity: 16.7266845703125
       Min Color: 0; 0; 0
-      Min Intensity: 0
+      Min Intensity: 0.00019073486328125
       Name: CloudMap
       Position Transformer: XYZ
       Selectable: true
-      Size (Pixels): 1
+      Size (Pixels): 3
       Size (m): 0.05000000074505806
       Style: Points
       Topic:
@@ -170,7 +172,7 @@ Visualization Manager:
         Durability Policy: Volatile
         History Policy: Keep Last
         Reliability Policy: Reliable
-        Value: /cloud_registered
+        Value: /cloud_effected
       Use Fixed Frame: true
       Use rainbow: true
       Value: true
@@ -250,25 +252,25 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz_default_plugins/Orbit
-      Distance: 19.242902755737305
+      Distance: 69.29391479492188
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
         Swap Stereo Eyes: false
         Value: false
       Focal Point:
-        X: 0.3028727173805237
-        Y: 0.6353289484977722
-        Z: 0.0467507503926754
+        X: 6.349839687347412
+        Y: -4.905503273010254
+        Z: -10.793662071228027
       Focal Shape Fixed Size: true
       Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 1.159797191619873
+      Pitch: 1.4097965955734253
       Target Frame: <Fixed Frame>
       Value: Orbit (rviz_default_plugins)
-      Yaw: 2.9435508251190186
+      Yaw: 1.2485512495040894
     Saved: ~
 Window Geometry:
   Displays:

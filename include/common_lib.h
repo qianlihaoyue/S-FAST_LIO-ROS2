@@ -9,6 +9,7 @@
 
 #include <rclcpp/time.hpp>
 #include <sensor_msgs/msg/imu.hpp>
+#include <nav_msgs/msg/odometry.hpp>
 
 // #define PI_M (3.14159265358)
 #define G_m_s2 (9.81)  // Gravaty const in GuangDong/China
@@ -43,6 +44,8 @@ struct MeasureGroup  // Lidar data and imu dates for the current process
     double lidar_end_time;
     PointCloudXYZI::Ptr lidar;
     std::deque<sensor_msgs::msg::Imu::ConstSharedPtr> imu;
+    std::deque<nav_msgs::msg::Odometry::ConstSharedPtr> wheel;
+    std::deque<nav_msgs::msg::Odometry::ConstSharedPtr> gnss;
 };
 
 template <typename T>

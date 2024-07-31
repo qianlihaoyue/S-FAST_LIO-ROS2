@@ -33,6 +33,9 @@ find_package(rosidl_default_generators REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(PCL REQUIRED)
 
+set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "/usr/share/cmake/geographiclib/")
+find_package(GeographicLib REQUIRED)
+
 set(Sophus_INCLUDE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/sophus/include")
 set(Sophus_LIBRARIES "${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/sophus/lib/libSophus.so")
 
@@ -71,7 +74,7 @@ add_library(fastlio_lib
   src/preprocess.cpp
   include/ikd-Tree/ikd_Tree.cpp
 )
-target_link_libraries(fastlio_lib ${PCL_LIBRARIES} ${Sophus_LIBRARIES})
+target_link_libraries(fastlio_lib ${PCL_LIBRARIES} ${Sophus_LIBRARIES} ${GeographicLib_LIBRARIES})
 ament_target_dependencies(fastlio_lib ${dependencies})
 rosidl_target_interfaces(fastlio_lib ${PROJECT_NAME} "rosidl_typesupport_cpp")
 install(TARGETS fastlio_lib DESTINATION lib/${PROJECT_NAME})

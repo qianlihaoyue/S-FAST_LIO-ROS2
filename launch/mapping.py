@@ -7,7 +7,7 @@ from launch_ros.actions import Node
 def generate_launch_description():
     package_dir = get_package_share_directory('fast_lio')
     # siasun 
-    config_file = os.path.join(package_dir, 'config','mid360.yaml')
+    config_file = os.path.join(package_dir, 'config','mid360.yaml') # hesai_gps 
     rviz_file = os.path.join(package_dir, 'config', 'lio.rviz')
 
     fast_lio_node = Node(

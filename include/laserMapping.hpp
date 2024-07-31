@@ -10,6 +10,8 @@
 #include <mutex>
 #include <omp.h>
 
+#include <GeographicLib/LocalCartesian.hpp>
+#include <sensor_msgs/msg/nav_sat_fix.hpp>
 #include "IMU_Processing.hpp"
 #include "preprocess.h"
 
@@ -28,7 +30,7 @@ public:
     void map_incremental();
 
     void publish_frame_world(rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pubLaserCloudFull);
-    void publish_map(rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pubLaserCloudMap);
+    void publish_cloud(rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pubLaserCloudMap, const PointCloudXYZI::Ptr& cloud);
     void publish_odometry(const rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr pubOdomAftMapped, std::unique_ptr<tf2_ros::TransformBroadcaster>& tf_br);
     void publish_path(rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr pubPath);
 
@@ -48,7 +50,7 @@ public:
 
     std::string lid_topic, imu_topic;
 
-    double last_timestamp_lidar = 0, last_timestamp_imu = -1.0;
+    double last_timestamp_lidar = 0, last_timestamp_imu = -1.0, last_timestamp_wheel = 0, last_timestamp_gnss = -1.0;
     double gyr_cov = 0.1, acc_cov = 0.1, b_gyr_cov = 0.0001, b_acc_cov = 0.0001;
     double cube_len = 0, lidar_end_time = 0, first_lidar_time = 0.0;
     int feats_down_size = 0;
@@ -58,13 +60,21 @@ public:
 
     std::vector<BoxPointType> cub_needrm;
     std::vector<PointVector> Nearest_Points;
-    std::vector<double> extrinT{3, 0.0};
-    std::vector<double> extrinR{9, 0.0};
     std::deque<double> time_buffer;
     std::deque<PointCloudXYZI::Ptr> lidar_buffer;
     std::deque<sensor_msgs::msg::Imu::ConstSharedPtr> imu_buffer;
 
-    PointCloudXYZI::Ptr featsFromMap{new PointCloudXYZI()};
+    // wheel
+    bool USE_WHEEL = false;
+    std::string wheel_topic;
+    std::deque<nav_msgs::msg::Odometry::ConstSharedPtr> wheel_buffer;
+
+    // GNSS
+    bool USE_GNSS = false;
+    std::string gnss_topic;
+    GeographicLib::LocalCartesian geo_converter;
+    std::deque<nav_msgs::msg::Odometry::ConstSharedPtr> gnss_buffer;
+
     PointCloudXYZI::Ptr feats_undistort{new PointCloudXYZI()};
     PointCloudXYZI::Ptr feats_down_body{new PointCloudXYZI()};   // 畸变纠正后降采样的单帧点云，lidar系
     PointCloudXYZI::Ptr feats_down_world{new PointCloudXYZI()};  // 畸变纠正后降采样的单帧点云，W系
@@ -126,11 +136,13 @@ private:
 
 private:
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pubLaserCloudFull, pubLaserCloudFull_body;
-    rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pubLaserCloudEffect, pubLaserCloudMap;
+    rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pubLaserCloudEffect, pubLaserCloudMap, pubLaserCloudFlash;
     rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr pubOdomAftMapped;
     rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr pubPath;
 
     rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr sub_imu;
+    rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr sub_wheel;
+    rclcpp::Subscription<sensor_msgs::msg::NavSatFix>::SharedPtr sub_gnss;
     rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr sub_pcl_pc;
     rclcpp::Subscription<livox_ros_driver2::msg::CustomMsg>::SharedPtr sub_pcl_livox;
 
@@ -173,6 +185,7 @@ private:
         po->y = p_global(1);
         po->z = p_global(2);
         po->intensity = pi->intensity;
+        po->curvature = pi->curvature;  // 仅用于可视化
     }
 
     void standard_pcl_cbk(const sensor_msgs::msg::PointCloud2::UniquePtr msg);
@@ -180,6 +193,8 @@ private:
     bool timediff_set_flg = false;
     void livox_pcl_cbk(const livox_ros_driver2::msg::CustomMsg::UniquePtr msg);
     void imu_cbk(const sensor_msgs::msg::Imu::UniquePtr msg_in);
+    void wheel_cbk(const nav_msgs::msg::Odometry::UniquePtr msg_in);
+    void gnss_cbk(const sensor_msgs::msg::NavSatFix::UniquePtr msg_in);
     double lidar_mean_scantime = 0.0;
     int scan_num = 0;
     bool sync_packages(MeasureGroup& meas);

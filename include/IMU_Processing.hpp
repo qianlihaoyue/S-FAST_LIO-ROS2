@@ -20,7 +20,7 @@ public:
     void Reset();
     void set_param(const V3D& transl, const M3D& rot, const V3D& gyr, const V3D& acc, const V3D& gyr_bias, const V3D& acc_bias);
     Eigen::Matrix<double, 12, 12> Q;  // 噪声协方差矩阵  对应论文式(8)中的Q
-    void Process(const MeasureGroup& meas, esekfom::esekf& kf_state, PointCloudXYZI::Ptr& pcl_un_);
+    void Process(MeasureGroup& meas, esekfom::esekf& kf_state, PointCloudXYZI::Ptr& pcl_un_);
 
     V3D cov_acc;              // 加速度协方差
     V3D cov_gyr;              // 角速度协方差
@@ -30,9 +30,17 @@ public:
     V3D cov_bias_acc;         // 加速度bias的协方差
     double first_lidar_time;  // 当前帧第一个点云时间
 
+    // wheel
+    double wheel_cov = 0.01;
+    Eigen::Vector3d wheel_velocity;
+
+    // gnss
+    double gnss_cov = 0.05;
+    geometry_msgs::msg::PoseWithCovariance gps_pos;  // 仅用于可视化
+
 private:
     void IMU_init(const MeasureGroup& meas, esekfom::esekf& kf_state, int& N);
-    void UndistortPcl(const MeasureGroup& meas, esekfom::esekf& kf_state, PointCloudXYZI& pcl_in_out);
+    void UndistortPcl(MeasureGroup& meas, esekfom::esekf& kf_state, PointCloudXYZI& pcl_in_out);
     // 噪声协方差Q的初始化(对应公式(8)的Q, 在IMU_Processing.hpp中使用)
     Eigen::Matrix<double, 12, 12> process_noise_cov() {
         Eigen::Matrix<double, 12, 12> Q = Eigen::MatrixXd::Zero(12, 12);

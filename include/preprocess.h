@@ -4,7 +4,7 @@
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <livox_ros_driver2/msg/custom_msg.hpp>
 
-enum LID_TYPE { AVIA = 1, VELO16, OUST64 };
+enum LID_TYPE { AVIA = 1, VELO16, OUST64 ,HESAI};
 enum TIME_UNIT { SEC = 0, MS = 1, US = 2, NS = 3 };
 
 // clang-format off
@@ -23,6 +23,24 @@ POINT_CLOUD_REGISTER_POINT_STRUCT(velodyne_ros::Point,
     (float, z, z)
     (float, intensity, intensity)
     (float, time, time)
+    (std::uint16_t, ring, ring)
+)
+
+namespace hesai_ros {
+  struct EIGEN_ALIGN16 Point {
+      PCL_ADD_POINT4D;
+      float intensity;
+      double timestamp;
+      uint16_t ring;
+      EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+  };
+}  // namespace velodyne_ros
+POINT_CLOUD_REGISTER_POINT_STRUCT(hesai_ros::Point,
+    (float, x, x)
+    (float, y, y)
+    (float, z, z)
+    (float, intensity, intensity)
+    (double, timestamp, timestamp)
     (std::uint16_t, ring, ring)
 )
 
@@ -75,4 +93,5 @@ private:
     void avia_handler(const livox_ros_driver2::msg::CustomMsg::UniquePtr &msg);
     void oust64_handler(const sensor_msgs::msg::PointCloud2::UniquePtr &msg);
     void velodyne_handler(const sensor_msgs::msg::PointCloud2::UniquePtr &msg);
+    void hesai_handler(const sensor_msgs::msg::PointCloud2::UniquePtr &msg);
 };

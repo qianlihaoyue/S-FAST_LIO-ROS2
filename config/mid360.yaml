@@ -1,14 +1,22 @@
 /**:
     ros__parameters:
         common:
-            lid_topic:  "/livox/lidar"
-            imu_topic:  "/livox/imu"
-            time_sync_en: false         # ONLY turn on when external time synchronization is really not possible
-            time_offset_lidar_to_imu: 0.0  
+            lid_topic:  "/livox/lidar_192_168_3_111"
+            imu_topic:  "/livox/imu_192_168_3_111"
+            # time_sync_en: false         # ONLY turn on when external time synchronization is really not possible
+            # time_offset_lidar_to_imu: 0.0  
 
-            filter_size_surf: 0.1
-            # filter_size_map: 0.5
-            # cube_len: 200.0
+            filter_size_surf: 0.25
+            filter_size_map: 0.25
+
+        wheel:
+            use_wheel: true
+            wheel_topic: "/agv_connect/carOdometry"
+            wheel_cov: 0.05
+            extrinsic_T: [ -1.225, -0.52, 0.0]
+            extrinsic_R: [  0.7073883, 0.7068252, 0.0000000, 
+                            -0.7068252, 0.7073883, 0.0000000, 
+                            0.0000000, 0.0000000, 1.0000000]
 
         kf:
             maximum_iter: 4
@@ -27,8 +35,8 @@
             gyr_cov: 0.1
             b_acc_cov: 0.0001
             b_gyr_cov: 0.0001
-            det_range:     450.0
-            extrinsic_est_en:  false      # true: enable the online estimation of IMU-LiDAR extrinsic
+            # det_range:     450.0
+            # extrinsic_est_en:  false      # true: enable the online estimation of IMU-LiDAR extrinsic
             extrinsic_T: [ -0.011, -0.02329, 0.04412 ]
             extrinsic_R: [ 1., 0., 0.,
                             0., 1., 0.,
@@ -43,7 +51,7 @@
 
         pcd_save:
             pcd_save_en: 1  # 0 1(one pcd)  2()
-            filter_size_savemap: 0.1
-            savemap_dir: /home/qianliyue/D:/RepoMy/save/lt/m3/
+            filter_size_savemap: 0.05
+            savemap_dir: /home/qianliyue/D:/RepoMy/save/project/mtest/
             
            

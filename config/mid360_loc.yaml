@@ -1,20 +1,37 @@
 /**:
     ros__parameters:
         common:
-            lid_topic:  "/livox/lidar"  # _192_168_3_111
-            imu_topic:  "/livox/imu"
-            time_sync_en: false         # ONLY turn on when external time synchronization is really not possible
-            time_offset_lidar_to_imu: 0.0  
+            lid_topic:  "/livox/lidar_192_168_3_111"  # _192_168_3_111
+            imu_topic:  "/livox/imu_192_168_3_111"
+            # time_sync_en: false         # ONLY turn on when external time synchronization is really not possible
+            # time_offset_lidar_to_imu: 0.0  
 
             filter_size_surf: 0.25
-            # filter_size_map: 0.5
-            # cube_len: 200.0
+            filter_size_map: 0.25
+
+        wheel:
+            use_wheel: true
+            wheel_topic: "/agv_connect/carOdometry"
+            wheel_cov: 0.01
+            extrinsic_T: [ -1.225, -0.52, 0.0]
+            extrinsic_R: [  0.7073883, 0.7068252, 0.0000000, 
+                            -0.7068252, 0.7073883, 0.0000000, 
+                            0.0000000, 0.0000000, 1.0000000]
+
+        # 测试 轮速计效果最好，反光条效果一般, 噪点太多
+        flash:
+            use_flash: false
+            flash_path: "/home/qianliyue/D:/RepoMy/save/project/mtest/c2/cloudFlash.pcd"
+            # flash_cov: 0.1
+            flash_thre: 100 # 强度阈值
+            flash_dis_thr: 0.2 # 距离阈值
 
         kf:
             maximum_iter: 4
             epsi: 0.001
             NUM_MATCH_POINTS: 5
-            plane_thr: 0.1
+            plane_thr: 0.1 # 距离阈值
+            plane_thr_min: 0.0
             extrinsic_est: false
 
         preprocess:
@@ -24,22 +41,18 @@
             point_filter_num: 1
 
         loc:
-            en: false
-            # loadmap_dir: /home/qianliyue/D:/RepoMy/save/lt/pingone/
-            loadmap_dir: /home/qianliyue/D:/RepoMy/save/lt/mupdate3/
-            # loadmap_dir: /home/qianliyue/D:/RepoMy/save/lt/msubmap/
-            # init_guess: [0.0, -0.05, 3.1, -7.48, -6.655, 0.] 
-            init_guess: [0., 0., 0., 0., 0., 0.] 
-            # init_guess: [0.0, 0.0, 3.14, -7.48, -6.655, 0.] 
-            # init_guess: [0.0, 0.0, 0.0, 3.0, 5.0, 0.] 
-            # init_guess: [0., 0., 3.12, -4.658, 1.383, 0.] 
+            en: true
+            loadmap_dir: /home/qianliyue/D:/RepoMy/save/project/mtest/c2/
+            # init_guess: [0., 0., 0., 0., 0., 0.]  # [r, p, y , x, y, z] (rad)
+            init_guess: [0., 0., 3.1 ,25.6 , -28.0 , 0.] 
+
             
         mapping:
             acc_cov: 0.1
             gyr_cov: 0.1
             b_acc_cov: 0.0001
             b_gyr_cov: 0.0001
-            det_range: 450.0
+            # det_range: 450.0
             extrinsic_est_en:  false      # true: enable the online estimation of IMU-LiDAR extrinsic
             extrinsic_T: [ -0.011, -0.02329, 0.04412 ]
             extrinsic_R: [  1., 0., 0.,
@@ -54,6 +67,6 @@
   
 
         pcd_save:
-            pcd_save_en: 0
-            savemap_dir: /home/qianliyue/D:/RepoMy/save/lt/test/
+            pcd_save_en: 1
+            savemap_dir: /home/qianliyue/D:/RepoMy/save/project/ltest/
  
