@@ -21,9 +21,9 @@ public:
     typedef Eigen::Matrix<double, STATE_DIM, STATE_DIM> cov;       // STATE_DIMXSTATE_DIM的协方差矩阵
     typedef Eigen::Matrix<double, STATE_DIM, 1> vectorized_state;  // STATE_DIMX1的向量
 
-    PointCloudXYZI::Ptr normvec{new PointCloudXYZI()};  // 特征点在地图中对应的平面参数(平面的单位法向量,以及当前点到平面距离)
-    PointCloudXYZI::Ptr laserCloudOri{new PointCloudXYZI()};  // 有效特征点
-    PointCloudXYZI::Ptr corr_normvect{new PointCloudXYZI()};  // 有效特征点对应点法相量
+    CloudType::Ptr normvec{new CloudType()};  // 特征点在地图中对应的平面参数(平面的单位法向量,以及当前点到平面距离)
+    CloudType::Ptr laserCloudOri{new CloudType()};  // 有效特征点
+    CloudType::Ptr corr_normvect{new CloudType()};  // 有效特征点对应点法相量
     std::vector<bool> point_selected_surf;                    // 判断是否是有效特征点
     std::vector<int> effect_idx;
 
@@ -64,8 +64,6 @@ public:
         x_r.bg += f_.block<3, 1>(15, 0);
         x_r.ba += f_.block<3, 1>(18, 0);
         x_r.grav += f_.block<3, 1>(21, 0);
-
-        x_r.offset_R_G_I *= Sophus::SO3::exp(f_.block<3, 1>(24, 0));
 
         return x_r;
     }
@@ -136,11 +134,11 @@ public:
     double flash_dis_thr = 0.2;
     int flash_thre = 100;
 
-    PointCloudXYZI::Ptr cloudFlash{new PointCloudXYZI};
+    CloudType::Ptr cloudFlash{new CloudType};
     pcl::KdTreeFLANN<PointType>::Ptr flashTree{new pcl::KdTreeFLANN<PointType>};
 
     // 计算每个特征点的残差及H矩阵
-    void h_share_model(dyn_share_datastruct& ekfom_data, PointCloudXYZI::Ptr& feats_down_body, KD_TREE<PointType>& ikdtree, vector<PointVector>& Nearest_Points,
+    void h_share_model(dyn_share_datastruct& ekfom_data, CloudType::Ptr& feats_down_body, KD_TREE<PointType>& ikdtree, vector<PointVector>& Nearest_Points,
                        bool extrinsic_est) {
         int feats_down_size = feats_down_body->points.size();
         laserCloudOri->clear();
@@ -298,13 +296,11 @@ public:
         x_r.block<3, 1>(18, 0) = x1.ba - x2.ba;
         x_r.block<3, 1>(21, 0) = x1.grav - x2.grav;
 
-        x_r.block<3, 1>(24, 0) = Sophus::SO3(x2.offset_R_G_I.matrix().transpose() * x1.offset_R_G_I.matrix()).log();
-
         return x_r;
     }
 
     // ESKF
-    void update_iterated_dyn_share_modified(double R, PointCloudXYZI::Ptr& feats_down_body, KD_TREE<PointType>& ikdtree, vector<PointVector>& Nearest_Points) {
+    void update_iterated_dyn_share_modified(double R, CloudType::Ptr& feats_down_body, KD_TREE<PointType>& ikdtree, vector<PointVector>& Nearest_Points) {
         normvec->resize(int(feats_down_body->points.size()));
         point_selected_surf.resize(int(feats_down_body->points.size()));
         std::fill(point_selected_surf.begin(), point_selected_surf.end(), false);
@@ -359,105 +355,6 @@ public:
                 return;
             }
         }
-    }
-
-    template <typename ValueType>
-    void update_iterated_dyn_share_template(std::function<void(dyn_share_datastruct&, const ValueType&)> h_share_model, const M3D& R, const ValueType& args) {
-        dyn_share_datastruct dyn_share;
-
-        int t = 0;
-        state_ikfom x_propagated = x_;  // 这里的x_和P_分别是经过正向传播后的状态量和协方差矩阵，因为会先调用predict函数再调用这个函数
-
-        Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic> K;  // DIM * 3
-        Eigen::Matrix<double, STATE_DIM, 1> dx_;                  // DIM * 1
-        auto I = Eigen::Matrix<double, STATE_DIM, STATE_DIM>::Identity();
-
-        for (int i = -1; i < maximum_iter; i++) {
-            h_share_model(dyn_share, args);
-
-            vectorized_state dx_new = boxminus(x_, x_propagated);
-
-            auto H = dyn_share.h_x;
-            K = P_ * H.transpose() * (H * P_ * H.transpose() + R).inverse();
-            dx_ = K * dyn_share.h + (K * H - I) * dx_new;
-            x_ = boxplus(x_, dx_);
-
-            dyn_share.converge = true;
-            for (int j = 0; j < STATE_DIM; j++) {
-                if (std::fabs(dx_[j]) > epsi) {  // 如果dx>epsi 认为没有收敛
-                    dyn_share.converge = false;
-                    break;
-                }
-            }
-
-            if (dyn_share.converge) t++;
-
-            if (!t && i == maximum_iter - 2) dyn_share.converge = true;
-
-            if (t > 0 || i == maximum_iter - 1) {
-                P_ = (I - K * H) * P_;  // 公式(19)
-                return;
-            }
-        }
-    }
-
-    // Wheel
-    Eigen::Matrix3d Wheel_R_wrt_IMU;
-    V3D Wheel_T_wrt_IMU;
-    V3D Trans_Vel;
-    const double wheel_s = 1;
-
-    void h_share_model_wheel(dyn_share_datastruct& ekfom_data, V3D wheel_v_vec) {
-        ekfom_data.h_x = Eigen::MatrixXd::Zero(3, STATE_DIM);
-        ekfom_data.h.resize(3);
-
-        // residual
-        M3D angv_crossmat;
-        V3D gyr_vec(in_.gyro[0] - x_.bg(0), in_.gyro[1] - x_.bg(1), in_.gyro[2] - x_.bg(2));  // imu 角速度
-        angv_crossmat << SKEW_SYM_MATRX(gyr_vec);
-        Trans_Vel = x_.rot.matrix() * Wheel_R_wrt_IMU * (wheel_v_vec - angv_crossmat * Wheel_T_wrt_IMU);
-        V3D res = x_.vel - Trans_Vel;
-        ekfom_data.h = -res;
-
-        // jacobian
-        M3D rot_crossmat;
-        rot_crossmat << SKEW_SYM_MATRX((x_.rot.matrix() * wheel_v_vec));    // 当前状态imu系下 点坐标反对称矩阵
-        ekfom_data.h_x.block<3, 3>(0, 3) = Wheel_R_wrt_IMU * rot_crossmat;  // diff w.r.t. rot
-        ekfom_data.h_x.block<3, 3>(0, 12) = Eye3d;                          // diff w.r.t. vel
-    }
-
-    void update_iterated_dyn_share_wheel(const M3D& R, const V3D& wheel_v_vec) {
-        update_iterated_dyn_share_template<V3D>([&](auto& dyn_share, const V3D& vec) { h_share_model_wheel(dyn_share, vec); }, R, wheel_v_vec);
-    }
-
-    // GNSS
-    int gnss_mode = 0;
-    void h_share_model_gnss(dyn_share_datastruct& ekfom_data, const V3D& gnss_pos) {
-        ekfom_data.h_x = Eigen::MatrixXd::Zero(3, STATE_DIM);
-        ekfom_data.h.resize(3);
-
-        // residual
-        auto pos = gnss_pos;
-        if (gnss_mode == 2) pos(2) = 0;  // Z轴强行为0
-        V3D res = x_.offset_R_G_I.matrix() * pos - x_.pos;
-        if (gnss_mode == 0) res(2) = 0;  // 不估计Z轴
-
-        ekfom_data.h = -res;  // ???
-
-        // jacobian
-        ekfom_data.h_x.block<3, 3>(0, 0) = -Eye3d;  // pos
-
-        M3D crossmat;
-        crossmat << SKEW_SYM_MATRX(pos);
-        // if yaw std converges do not estimate R_G_I
-        // if (sqrt(P_(26, 26)) > 1e-4) {
-        ekfom_data.h_x.block<3, 3>(0, 24) = -(x_.offset_R_G_I.matrix() * crossmat);
-        // auto rot_ang = x_.offset_R_G_I.matrix().eulerAngles(0, 1, 2)(2);
-        // std::cerr << "Estimate R_G_I !  " << rot_ang << " " << RAD2DEG(rot_ang) << "\n" << x_.offset_R_G_I.matrix() << std::endl;
-    }
-
-    void update_iterated_dyn_share_gnss(const M3D& R, const V3D& gnss_pos) {
-        update_iterated_dyn_share_template<V3D>([&](auto& dyn_share, const auto& pos) { h_share_model_gnss(dyn_share, pos); }, R, gnss_pos);
     }
 
 private:

@@ -1,8 +1,8 @@
-#include <rclcpp/rclcpp.hpp>
-#include <nav_msgs/msg/odometry.hpp>
-#include <nav_msgs/msg/path.hpp>
-#include <tf2_ros/transform_broadcaster.h>
-#include <visualization_msgs/msg/marker.hpp>
+#include <ros/ros.h>
+#include <nav_msgs/Odometry.h>
+#include <nav_msgs/Path.h>
+#include <tf/transform_broadcaster.h>
+#include <visualization_msgs/Marker.h>
 #include <pcl/filters/voxel_grid.h>
 #include <pcl_conversions/pcl_conversions.h>
 
@@ -10,29 +10,24 @@
 #include <mutex>
 #include <omp.h>
 
-#include <GeographicLib/LocalCartesian.hpp>
-#include <sensor_msgs/msg/nav_sat_fix.hpp>
 #include "IMU_Processing.hpp"
 #include "preprocess.h"
 
 #define INIT_TIME (0.1)
 #define LASER_POINT_COV (0.001)
-#define PUBFRAME_PERIOD (20)
+// #define PUBFRAME_PERIOD (20)
 
-class LaserMapping : public rclcpp::Node {
+class LaserMapping {
 public:
     void readParameters();
     void initLIO();
 
-    BoxPointType LocalMap_Points;       // ikd-tree地图立方体的2个角点
-    bool Localmap_Initialized = false;  // 局部地图是否初始化
-    void lasermap_fov_segment();
     void map_incremental();
 
-    void publish_frame_world(rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pubLaserCloudFull);
-    void publish_cloud(rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pubLaserCloudMap, const PointCloudXYZI::Ptr& cloud);
-    void publish_odometry(const rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr pubOdomAftMapped, std::unique_ptr<tf2_ros::TransformBroadcaster>& tf_br);
-    void publish_path(rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr pubPath);
+    void publish_frame_world();
+    void publish_cloud(const ros::Publisher& pubLaserCloudMap, const CloudType::Ptr& cloud);
+    void publish_odometry(const ros::Publisher& pubOdomAftMapped);
+    void publish_path(const ros::Publisher& pubPath);
 
     /*** Time Log Variables ***/
     int add_point_size = 0, kdtree_delete_counter = 0;
@@ -42,46 +37,35 @@ public:
     std::ofstream fout_traj;
     /**************************/
 
-    float DET_RANGE = 300.0f;
-    const float MOV_THRESHOLD = 1.5f;
     double time_diff_lidar_to_imu = 0.0;
 
     mutex mtx_buffer;
 
     std::string lid_topic, imu_topic;
 
-    double last_timestamp_lidar = 0, last_timestamp_imu = -1.0, last_timestamp_wheel = 0, last_timestamp_gnss = -1.0;
+    double last_timestamp_lidar = 0, last_timestamp_imu = -1.0;
     double gyr_cov = 0.1, acc_cov = 0.1, b_gyr_cov = 0.0001, b_acc_cov = 0.0001;
-    double cube_len = 0, lidar_end_time = 0, first_lidar_time = 0.0;
+    double lidar_end_time = 0, first_lidar_time = 0.0;
     int feats_down_size = 0;
 
     bool lidar_pushed, flg_first_scan = true, flg_EKF_inited;
     bool scan_pub_en = false, dense_pub_en = false;
 
-    std::vector<BoxPointType> cub_needrm;
     std::vector<PointVector> Nearest_Points;
     std::deque<double> time_buffer;
-    std::deque<PointCloudXYZI::Ptr> lidar_buffer;
-    std::deque<sensor_msgs::msg::Imu::ConstSharedPtr> imu_buffer;
+    std::deque<CloudType::Ptr> lidar_buffer;
+    std::deque<sensor_msgs::Imu::ConstPtr> imu_buffer;
 
-    // wheel
-    bool USE_WHEEL = false;
-    std::string wheel_topic;
-    std::deque<nav_msgs::msg::Odometry::ConstSharedPtr> wheel_buffer;
+    CloudType::Ptr feats_undistort{new CloudType()};
+    CloudType::Ptr feats_down_body{new CloudType()};
+    CloudType::Ptr feats_down_world{new CloudType()};
 
-    // GNSS
-    bool USE_GNSS = false;
-    std::string gnss_topic;
-    GeographicLib::LocalCartesian geo_converter;
-    std::deque<nav_msgs::msg::Odometry::ConstSharedPtr> gnss_buffer;
-
-    PointCloudXYZI::Ptr feats_undistort{new PointCloudXYZI()};
-    PointCloudXYZI::Ptr feats_down_body{new PointCloudXYZI()};   // 畸变纠正后降采样的单帧点云，lidar系
-    PointCloudXYZI::Ptr feats_down_world{new PointCloudXYZI()};  // 畸变纠正后降采样的单帧点云，W系
+    // Dyna
+    void dyna_incremental();
 
     // Loc
     bool loc_mode = false;
-    PointCloudXYZI::Ptr prior_cloud{new PointCloudXYZI()};
+    CloudType::Ptr prior_cloud{new CloudType()};
     std::vector<double> init_guess{6, 0};
     std::string loadmap_dir;
     void initLoc();
@@ -91,10 +75,10 @@ public:
     double filter_size_savemap = 0.2;
     pcl::VoxelGrid<PointType> downSizeFilterSaveMap;
     std::string savemap_dir;
-    PointCloudXYZI::Ptr pcl_wait_save{new PointCloudXYZI()};
-    PointCloudXYZI::Ptr pcl_effect_save{new PointCloudXYZI()};
-    std::vector<PointCloudXYZI::Ptr> pcl_save_block;
-    void savemap_callback();
+    CloudType::Ptr pcl_wait_save{new CloudType()};
+    CloudType::Ptr pcl_effect_save{new CloudType()};
+    std::vector<CloudType::Ptr> pcl_save_block;
+    void savemap_callback(const ros::TimerEvent& event);
     void saveMap();
     void saveMap(const std::string& path);
 
@@ -107,7 +91,7 @@ public:
     V3D Lidar_T_wrt_IMU{Zero3d};
     M3D Lidar_R_wrt_IMU{Eye3d};
 
-    rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr marker_pub_;
+    ros::Publisher marker_pub_;
     void publish_pca(const Eigen::Matrix3d& covariance_matrix);
 
     /*** EKF inputs and output ***/
@@ -118,42 +102,31 @@ public:
     state_ikfom state_point;
     Eigen::Vector3d pos_lid;  // 估计的W系下的位置
 
-    nav_msgs::msg::Path path;
-    nav_msgs::msg::Odometry odomAftMapped;
-    geometry_msgs::msg::PoseStamped msg_body_pose;
+    nav_msgs::Path path;
+    nav_msgs::Odometry odomAftMapped;
+    geometry_msgs::PoseStamped msg_body_pose;
 
     shared_ptr<Preprocess> p_pre{new Preprocess()};
     shared_ptr<ImuProcess> p_imu{new ImuProcess()};
 
-    LaserMapping(const rclcpp::NodeOptions& options = rclcpp::NodeOptions()) : Node("laser_mapping", options) {
+    LaserMapping(const ros::NodeHandle& nh_) : nh(nh_) {
         readParameters();
         initLIO();
         initLoc();
     }
 
-private:
     void timer_callback();
 
 private:
-    rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pubLaserCloudFull, pubLaserCloudFull_body;
-    rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pubLaserCloudEffect, pubLaserCloudMap, pubLaserCloudFlash;
-    rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr pubOdomAftMapped;
-    rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr pubPath;
+    ros::NodeHandle nh;
 
-    rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr sub_imu;
-    rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr sub_wheel;
-    rclcpp::Subscription<sensor_msgs::msg::NavSatFix>::SharedPtr sub_gnss;
-    rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr sub_pcl_pc;
-    rclcpp::Subscription<livox_ros_driver2::msg::CustomMsg>::SharedPtr sub_pcl_livox;
+    ros::Publisher pubLaserCloudFull, pubLaserCloudFull_body;
+    ros::Publisher pubLaserCloudEffect, pubLaserCloudNoEffect, pubLaserCloudMap, pubLaserCloudFlash;
+    ros::Publisher pubOdomAftMapped;
+    ros::Publisher pubPath;
 
-    std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster;
-    rclcpp::TimerBase::SharedPtr timer_;
+    ros::Subscriber sub_imu, sub_pcl;
 
-    template <typename T>
-    void declare_and_get_parameter(const std::string& name, T& variable, const T& default_value) {
-        this->declare_parameter<T>(name, default_value);
-        this->get_parameter(name, variable);
-    }
     template <typename T>
     void set_posestamp(T& out) {
         out.pose.position.x = state_point.pos(0);
@@ -172,29 +145,23 @@ private:
         V3D p_body(pi[0], pi[1], pi[2]);
         V3D p_global(state_point.rot.matrix() * (state_point.offset_R_L_I.matrix() * p_body + state_point.offset_T_L_I) + state_point.pos);
 
-        po[0] = p_global(0);
-        po[1] = p_global(1);
-        po[2] = p_global(2);
+        po[0] = p_global(0), po[1] = p_global(1), po[2] = p_global(2);
     }
 
     void pointBodyToWorld(PointType const* const pi, PointType* const po) {
         V3D p_body(pi->x, pi->y, pi->z);
         V3D p_global(state_point.rot.matrix() * (state_point.offset_R_L_I.matrix() * p_body + state_point.offset_T_L_I) + state_point.pos);
 
-        po->x = p_global(0);
-        po->y = p_global(1);
-        po->z = p_global(2);
+        po->x = p_global(0), po->y = p_global(1), po->z = p_global(2);
         po->intensity = pi->intensity;
         po->curvature = pi->curvature;  // 仅用于可视化
     }
 
-    void standard_pcl_cbk(const sensor_msgs::msg::PointCloud2::UniquePtr msg);
+    void standard_pcl_cbk(const sensor_msgs::PointCloud2::ConstPtr& msg);
     double timediff_lidar_wrt_imu = 0.0;
     bool timediff_set_flg = false;
-    void livox_pcl_cbk(const livox_ros_driver2::msg::CustomMsg::UniquePtr msg);
-    void imu_cbk(const sensor_msgs::msg::Imu::UniquePtr msg_in);
-    void wheel_cbk(const nav_msgs::msg::Odometry::UniquePtr msg_in);
-    void gnss_cbk(const sensor_msgs::msg::NavSatFix::UniquePtr msg_in);
+    void livox_pcl_cbk(const livox_ros_driver::CustomMsg::ConstPtr& msg);
+    void imu_cbk(const sensor_msgs::Imu::ConstPtr& msg_in);
     double lidar_mean_scantime = 0.0;
     int scan_num = 0;
     bool sync_packages(MeasureGroup& meas);

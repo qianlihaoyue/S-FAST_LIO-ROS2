@@ -4,17 +4,26 @@
 std::shared_ptr<LaserMapping> fastlio_node;
 
 void SigHandle(int sig) {
-    std::cout << "catch sig " << sig << std::endl;
+    ROS_INFO("catch sig %d", sig);
     fastlio_node->saveMap();
-    rclcpp::shutdown();
+    ros::shutdown();
 }
 
 int main(int argc, char** argv) {
-    rclcpp::init(argc, argv);
+    ros::init(argc, argv, "laserMapping");
+    ros::NodeHandle nh;
 
     signal(SIGINT, SigHandle);
 
-    fastlio_node = std::make_shared<LaserMapping>();
+    fastlio_node = std::make_shared<LaserMapping>(nh);
 
-    rclcpp::spin(fastlio_node);
-};
+    ros::Rate rate(1000);
+    while (ros::ok()) {
+        ros::spinOnce();
+        fastlio_node->timer_callback();
+        rate.sleep();
+    }
+
+    ros::spin();
+    return 0;
+}
