@@ -1,0 +1,56 @@
+
+common:
+    lid_topic:  "/velodyne_points"
+    imu_topic:  "/imu_6"
+
+    # time_offset_lidar_to_imu : -1655306014.614445
+
+    filter_size_surf: 0.5
+    filter_size_map: 0.5
+
+kf:
+    maximum_iter: 4
+    epsi: 0.001
+    NUM_MATCH_POINTS: 5
+    plane_thr: 0.1
+
+dyna:
+    en: false
+    # ivox_capacity : 10000 # 需要控制size，不能太大，会喧宾夺主
+    ivox_resolution: 0.15
+    use_chi: false
+    chi_square_critical: 0.455  # 3.84 - 95%   2.71 - 90%   1.64 - 80%    1.07 - 70%    0.708 - 60%  0.455 - 50%
+
+
+preprocess:
+    lidar_type: 2            
+    scan_line: 32
+    blind: 2.0
+    point_filter_num: 1
+    # timestamp_unit: 3
+
+mapping:
+    acc_cov: 0.1
+    gyr_cov: 0.1
+    b_acc_cov: 0.0001
+    b_gyr_cov: 0.0001
+
+    extrinsic_T: [ 0.112, 0.176, -0.247 ]       
+    # extrinsic_R: [ 1., 0., 0.,    0., 1., 0.,    0., 0., 1.]
+    extrinsic_R: [-0.012269, 0.99983, -0.014119, -0.99992, -0.012309, -0.0027239, -0.0028972, 0.014084, 0.9999]
+
+
+
+publish:
+    path_en:  true
+    scan_publish_en:  true       # false: close all the point cloud output
+    dense_publish_en: true       # false: low down the points number in a global-frame point clouds scan.
+    runtime_pos_log: true
+
+
+pcd_save:
+    pcd_save_en: 0  # 0 1(one pcd)  2()
+    filter_size_savemap: 0.1
+    savemap_dir: /home/qianliyue/D:/RepoMy/save/paper/mTorwic/
+    
+    

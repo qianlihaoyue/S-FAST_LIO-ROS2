@@ -5,11 +5,10 @@
 #include <Eigen/Core>
 #include <pcl/point_types.h>
 #include <pcl/point_cloud.h>
-#include <fast_lio/msg/pose6_d.hpp>
+#include <lt_lio/Pose6D.h>
 
-#include <rclcpp/time.hpp>
-#include <sensor_msgs/msg/imu.hpp>
-#include <nav_msgs/msg/odometry.hpp>
+#include <sensor_msgs/Imu.h>
+#include <nav_msgs/Odometry.h>
 
 // #define PI_M (3.14159265358)
 #define G_m_s2 (9.81)  // Gravaty const in GuangDong/China
@@ -20,9 +19,9 @@
 #define SKEW_SYM_MATRX(v) 0.0, -v[2], v[1], v[2], 0.0, -v[0], -v[1], v[0], 0.0
 #define DEBUG_FILE_DIR(name) (string(string(ROOT_DIR) + "Log/" + name))
 
-typedef fast_lio::msg::Pose6D Pose6D;
+typedef lt_lio::Pose6D Pose6D;
 typedef pcl::PointXYZINormal PointType;
-typedef pcl::PointCloud<PointType> PointCloudXYZI;
+typedef pcl::PointCloud<PointType> CloudType;
 typedef std::vector<PointType, Eigen::aligned_allocator<PointType>> PointVector;
 typedef Eigen::Vector3d V3D;
 typedef Eigen::Matrix3d M3D;
@@ -38,14 +37,12 @@ struct MeasureGroup  // Lidar data and imu dates for the current process
 {
     MeasureGroup() {
         lidar_beg_time = 0.0;
-        this->lidar.reset(new PointCloudXYZI());
+        this->lidar.reset(new CloudType());
     };
     double lidar_beg_time;
     double lidar_end_time;
-    PointCloudXYZI::Ptr lidar;
-    std::deque<sensor_msgs::msg::Imu::ConstSharedPtr> imu;
-    std::deque<nav_msgs::msg::Odometry::ConstSharedPtr> wheel;
-    std::deque<nav_msgs::msg::Odometry::ConstSharedPtr> gnss;
+    CloudType::Ptr lidar;
+    std::deque<sensor_msgs::Imu::ConstPtr> imu;
 };
 
 template <typename T>
@@ -103,13 +100,4 @@ bool esti_plane(Eigen::Matrix<T, 4, 1>& pca_result, const PointVector& point, co
         }
     }
     return true;
-}
-
-inline double get_time_sec(const builtin_interfaces::msg::Time& time) { return rclcpp::Time(time).seconds(); }
-
-inline rclcpp::Time get_ros_time(double timestamp) {
-    int32_t sec = std::floor(timestamp);
-    auto nanosec_d = (timestamp - std::floor(timestamp)) * 1e9;
-    uint32_t nanosec = nanosec_d;
-    return rclcpp::Time(sec, nanosec);
 }

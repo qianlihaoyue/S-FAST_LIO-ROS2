@@ -1,0 +1,60 @@
+/**:
+    ros__parameters:
+        common:
+            lid_topic:  "/os1_points"
+            imu_topic:  "/imu/data_raw"
+            filter_size_surf: 0.5
+            filter_size_map: 0.25
+
+        kf:
+            maximum_iter: 4
+            epsi: 0.001
+            NUM_MATCH_POINTS: 5
+            plane_thr: 0.1 # 距离阈值
+
+        preprocess:
+            lidar_type: 3                # 1 for Livox serials LiDAR, 2 for Velodyne LiDAR, 3 for ouster LiDAR, 
+            scan_line: 64
+            blind: 2.0     	 
+            max_range: 40.
+            point_filter_num: 10
+
+        dyna:
+            en: false
+            ivox_capacity : 2000
+            ivox_resolution: 0.25
+
+        loc:
+            en: true
+            loadmap_dir: /home/qianliyue/D:/RepoMy/save/paper/mLT/
+            # init_guess: [0., 0., 0.18, 20., 35., 0.]       # 2
+            # init_guess: [0.069,-0.012,-2.47,2.26,22.086,0.508]       # 3
+            # init_guess: [0.026, -0.06, -2.95, 25.84, 39.76, 0. ]       # 4
+            # init_guess: [0.028,-0.037,-3.09,20.82,13.04,0.0] # 5
+            init_guess: [0., 0., -2.5, 0., 20., 0.] # 6
+
+            # loadmap_dir: /home/qianliyue/D:/RepoMy/save/paper/mc2/
+            # init_guess: [0., 0., 0., 0., 0., 0.]  # [r, p, y , x, y, z] (rad)
+            # loadmap_dir: /home/qianliyue/D:/RepoMy/save/paper/mFFR/
+            # init_guess: [0.01768,	-0.002955, -0.010476, 1.889178, 1.339936,0.029177] 
+
+            
+        mapping:
+            acc_cov: 0.1
+            gyr_cov: 0.1
+            b_acc_cov: 0.0001
+            b_gyr_cov: 0.0001
+            extrinsic_T: [ 1.77, -0.00, -0.05 ]
+            extrinsic_R: [-1., 0., 0.,   0., -1., 0.,  0., 0., 1.]
+
+        publish:
+            path_en:  true
+            scan_publish_en:  true       # false: close all the point cloud output
+            dense_publish_en: false       # false: low down the points number in a global-frame point clouds scan.
+            runtime_pos_log: true
+  
+
+        pcd_save:
+            pcd_save_en: 0
+            savemap_dir: /home/qianliyue/D:/RepoMy/save/paper/ltest/
+ 

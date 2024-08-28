@@ -13,9 +13,9 @@
 - 2.4 - 7.11 - 添加PCA法向分析
 - 2.5 - 7.17 - 取消submap移动，优化地图保存逻辑
 
-- branch - project
+- branch - dyna
 
-- b1.0 - 7.31 - 合并Wheel，GNSS，反光条
+- b2.0 - ros1 dyna
 
 
 ## Simplified Implementation of FAST_LIO

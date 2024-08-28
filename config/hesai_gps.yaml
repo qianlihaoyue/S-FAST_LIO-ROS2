@@ -8,10 +8,9 @@
 
             filter_size_surf: 0.5
             filter_size_map: 0.5
-            # cube_len: 100.0
 
         gnss:
-            use_gnss: true
+            use_gnss: false # 感觉在某些情况下，好像有问题，有隐患
             gnss_topic: "/gps_driver/gps_data"
             gnss_cov: 0.05
             gnss_mode : 0 # 0: 估计xy（默认，如果z轴对不上，可以加PGO回环）， 1: 估计xyz（不推荐）  2：估计xy，z高度强行等于0（很粗暴，不推荐）
@@ -34,8 +33,6 @@
             gyr_cov: 0.1
             b_acc_cov: 0.0001
             b_gyr_cov: 0.0001
-            det_range: 450.0
-            extrinsic_est_en:  false      # true: enable the online estimation of IMU-LiDAR extrinsic
             extrinsic_T: [ -0.011, -0.02329, 0.04412 ]
             extrinsic_R: [ 1., 0., 0.,
                             0., 1., 0.,

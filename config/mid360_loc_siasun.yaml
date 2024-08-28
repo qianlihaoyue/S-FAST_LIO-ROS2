@@ -1,7 +1,7 @@
 
 common:
-    lid_topic:  "/livox/lidar_192_168_3_111"  # _192_168_3_111
-    imu_topic:  "/livox/imu_192_168_3_111"
+    lid_topic:  "/livox/lidar"  # _192_168_3_111
+    imu_topic:  "/livox/imu"
     filter_size_surf: 0.25
     filter_size_map: 0.25
 
@@ -14,25 +14,20 @@ kf:
 preprocess:
     lidar_type: 1                # 1 for Livox serials LiDAR, 2 for Velodyne LiDAR, 3 for ouster LiDAR, 
     scan_line: 4
-    blind: 2.0     	 
-    max_range: 20.0
+    blind: 2.0 
+    max_range: 40.0
     point_filter_num: 1
 
 dyna:
-    en: true
-    # ivox_capacity : 10000 # 需要控制size，不能太大，会喧宾夺主
-    ivox_resolution: 0.15
-    use_chi: true
-    chi_square_critical: 0.455  # 3.84 - 95%   2.71 - 90%   1.64 - 80%    1.07 - 70%    0.708 - 60%  0.455 - 50%
+    en: false
+    ivox_resolution: 0.25
+    use_chi: false
+    chi_square_critical: 6  # 3.84 - 95%   2.71 - 90%   1.64 - 80%    1.07 - 70%    0.708 - 60%  0.455 - 50%
 
 loc:
     en: true
-    loadmap_dir: /home/qianliyue/D:/RepoMy/save/paper/mc2/
-    # loadmap_dir: /home/qianliyue/D:/RepoMy/save/project/mtong/
+    loadmap_dir: /home/qianliyue/D:/RepoMy/save/paper/mlt/
     init_guess: [0., 0., 0., 0., 0., 0.]  # [r, p, y , x, y, z] (rad)
-    # loadmap_dir: /home/qianliyue/D:/RepoMy/save/paper/mFFR/
-    # init_guess: [0.01768,	-0.002955, -0.010476, 1.889178, 1.339936,0.029177] 
-
     
 mapping:
     acc_cov: 0.1

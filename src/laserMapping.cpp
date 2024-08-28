@@ -2,31 +2,28 @@
 #include "common_lib.h"
 
 void LaserMapping::initLIO() {
-    if (p_pre->lidar_type == AVIA) {
-        sub_pcl_livox =
-            this->create_subscription<livox_ros_driver2::msg::CustomMsg>(lid_topic, 20, std::bind(&LaserMapping::livox_pcl_cbk, this, std::placeholders::_1));
-    } else {
-        sub_pcl_pc = this->create_subscription<sensor_msgs::msg::PointCloud2>(lid_topic, rclcpp::SensorDataQoS(),
-                                                                              std::bind(&LaserMapping::standard_pcl_cbk, this, std::placeholders::_1));
-    }
-    sub_imu = this->create_subscription<sensor_msgs::msg::Imu>(imu_topic, 10, std::bind(&LaserMapping::imu_cbk, this, std::placeholders::_1));
-    sub_wheel = this->create_subscription<nav_msgs::msg::Odometry>(wheel_topic, 10, std::bind(&LaserMapping::wheel_cbk, this, std::placeholders::_1));
-    sub_gnss = this->create_subscription<sensor_msgs::msg::NavSatFix>(gnss_topic, 10, std::bind(&LaserMapping::gnss_cbk, this, std::placeholders::_1));
+    cout << "lid_topic: " << lid_topic << endl;
 
-    pubLaserCloudFull = this->create_publisher<sensor_msgs::msg::PointCloud2>("/cloud_registered", 20);
-    pubLaserCloudFull_body = this->create_publisher<sensor_msgs::msg::PointCloud2>("/cloud_registered_body", 20);
-    pubLaserCloudEffect = this->create_publisher<sensor_msgs::msg::PointCloud2>("/cloud_effected", 20);
-    pubLaserCloudMap = this->create_publisher<sensor_msgs::msg::PointCloud2>("/Laser_map", 20);
-    pubLaserCloudFlash = this->create_publisher<sensor_msgs::msg::PointCloud2>("/cloudFlash", 20);
-    pubOdomAftMapped = this->create_publisher<nav_msgs::msg::Odometry>("/Odometry", 20);
-    pubPath = this->create_publisher<nav_msgs::msg::Path>("/path", 20);
-    path.header.stamp = this->get_clock()->now();
+    sub_pcl = p_pre->lidar_type == AVIA ? nh.subscribe(lid_topic, 200000, &LaserMapping::livox_pcl_cbk, this)
+                                        : nh.subscribe(lid_topic, 200000, &LaserMapping::standard_pcl_cbk, this);
+    sub_imu = nh.subscribe(imu_topic, 200000, &LaserMapping::imu_cbk, this);
+
+    pubLaserCloudFull = nh.advertise<sensor_msgs::PointCloud2>("/cloud_registered", 100000);
+    pubLaserCloudFull_body = nh.advertise<sensor_msgs::PointCloud2>("/cloud_registered_body", 100000);
+    pubLaserCloudEffect = nh.advertise<sensor_msgs::PointCloud2>("/cloud_effected", 100000);
+    pubLaserCloudNoEffect = nh.advertise<sensor_msgs::PointCloud2>("/cloud_noeffected", 100000);
+    pubLaserCloudMap = nh.advertise<sensor_msgs::PointCloud2>("/Laser_map", 100000);
+    pubLaserCloudFlash = nh.advertise<sensor_msgs::PointCloud2>("/cloudFlash", 100000);
+    pubOdomAftMapped = nh.advertise<nav_msgs::Odometry>("/Odometry", 100000);
+    pubPath = nh.advertise<nav_msgs::Path>("/path", 100000);
+
+    path.header.stamp = ros::Time::now();
     path.header.frame_id = "camera_init";
 
-    marker_pub_ = this->create_publisher<visualization_msgs::msg::Marker>("pca_marker", 10);
-    tf_broadcaster = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
-    timer_ = rclcpp::create_timer(this, this->get_clock(), std::chrono::milliseconds(10), std::bind(&LaserMapping::timer_callback, this));
-    auto timer_savemap_ = rclcpp::create_timer(this, this->get_clock(), std::chrono::seconds(10), std::bind(&LaserMapping::savemap_callback, this));
+    marker_pub_ = nh.advertise<visualization_msgs::Marker>("pca_marker", 100000);
+
+    // ros::Timer timer_ = nh.createTimer(ros::Duration(0.001), &LaserMapping::timer_callback, this);
+    // ros::Timer timer_savemap_ = nh.createTimer(ros::Duration(10.0), &LaserMapping::savemap_callback, this);
 
     downSizeFilterSurf.setLeafSize(filter_size_surf_min, filter_size_surf_min, filter_size_surf_min);
     // downSizeFilterMap.setLeafSize(filter_size_map_min, filter_size_map_min, filter_size_map_min);
@@ -36,28 +33,33 @@ void LaserMapping::initLIO() {
 }
 
 void LaserMapping::initLoc() {
-    declare_and_get_parameter<bool>("loc.en", loc_mode, false);
+    nh.param<bool>("loc/en", loc_mode, false);
     if (loc_mode) {
-        declare_and_get_parameter<string>("loc.loadmap_dir", loadmap_dir, string(ROOT_DIR) + "PCD/");
+        nh.param<string>("loc/loadmap_dir", loadmap_dir, string(ROOT_DIR) + "PCD/");
 
         // 加载读取点云数据到cloud中
         string all_points_dir(loadmap_dir + "scans.pcd");
         if (pcl::io::loadPCDFile<PointType>(all_points_dir, *prior_cloud) == -1) std::cerr << "Read file fail! " << all_points_dir << std::endl;
         ikdtree.set_downsample_param(filter_size_map_min);
         ikdtree.Build(prior_cloud->points);
-        std::cout << "---- ikdtree size: " << ikdtree.size() << std::endl;
+        std::cout << "ori size: " << prior_cloud->points.size() << "---- ikdtree size: " << ikdtree.size() << std::endl;
 
         if (scan_pub_en) {
             PointVector().swap(ikdtree.PCL_Storage);
             ikdtree.flatten(ikdtree.Root_Node, ikdtree.PCL_Storage, NOT_RECORD);
-            PointCloudXYZI::Ptr featsFromMap{new PointCloudXYZI()};
+            CloudType::Ptr featsFromMap{new CloudType()};
             featsFromMap->points = ikdtree.PCL_Storage;
-            while (pubLaserCloudMap->get_subscription_count() == 0) std::this_thread::sleep_for(std::chrono::seconds(1));
+            std::cout << "---- PCL_Storage size: " << featsFromMap->points.size() << std::endl;
+            downSizeFilterSurf.setLeafSize(1.0, 1.0, 1.0);
+            downSizeFilterSaveMap.setInputCloud(featsFromMap);
+            downSizeFilterSaveMap.filter(*featsFromMap);
+            downSizeFilterSurf.setLeafSize(filter_size_surf_min, filter_size_surf_min, filter_size_surf_min);
+            while (pubLaserCloudMap.getNumSubscribers() == 0) {
+            };
             publish_cloud(pubLaserCloudMap, featsFromMap);
-            if (kf.USE_FLASH) publish_cloud(pubLaserCloudFlash, kf.cloudFlash);
         }
 
-        declare_and_get_parameter<vector<double>>("loc.init_guess", init_guess, vector<double>());
+        nh.param<vector<double>>("loc/init_guess", init_guess, vector<double>());
         state_point = kf.get_x();
         // state_point.pos = Eigen::Vector3d(init_guess[3], init_guess[4], init_guess[5]);
 
@@ -75,63 +77,11 @@ void LaserMapping::initLoc() {
     }
 }
 
-void LaserMapping::lasermap_fov_segment() {
-    cub_needrm.clear();  // 清空需要移除的区域
-    kdtree_delete_counter = 0;
-
-    V3D pos_LiD = pos_lid;  // W系下位置
-    // 初始化局部地图范围，以pos_LiD为中心,长宽高均为cube_len
-    if (!Localmap_Initialized) {
-        for (int i = 0; i < 3; i++) {
-            LocalMap_Points.vertex_min[i] = pos_LiD(i) - cube_len / 2.0;
-            LocalMap_Points.vertex_max[i] = pos_LiD(i) + cube_len / 2.0;
-        }
-        Localmap_Initialized = true;
-        return;
-    }
-
-    // 各个方向上pos_LiD与局部地图边界的距离
-    float dist_to_map_edge[3][2];
-    bool need_move = false;
-    for (int i = 0; i < 3; i++) {
-        dist_to_map_edge[i][0] = fabs(pos_LiD(i) - LocalMap_Points.vertex_min[i]);
-        dist_to_map_edge[i][1] = fabs(pos_LiD(i) - LocalMap_Points.vertex_max[i]);
-        // 与某个方向上的边界距离（1.5*300m）太小，标记需要移除need_move(FAST-LIO2论文Fig.3)
-        if (dist_to_map_edge[i][0] <= MOV_THRESHOLD * DET_RANGE || dist_to_map_edge[i][1] <= MOV_THRESHOLD * DET_RANGE) need_move = true;
-    }
-    if (!need_move) return;  // 如果不需要，直接返回，不更改局部地图
-
-    BoxPointType New_LocalMap_Points, tmp_boxpoints;
-    New_LocalMap_Points = LocalMap_Points;
-    // 需要移动的距离
-    float mov_dist = max((cube_len - 2.0 * MOV_THRESHOLD * DET_RANGE) * 0.5 * 0.9, double(DET_RANGE * (MOV_THRESHOLD - 1)));
-    for (int i = 0; i < 3; i++) {
-        tmp_boxpoints = LocalMap_Points;
-        if (dist_to_map_edge[i][0] <= MOV_THRESHOLD * DET_RANGE) {
-            New_LocalMap_Points.vertex_max[i] -= mov_dist;
-            New_LocalMap_Points.vertex_min[i] -= mov_dist;
-            tmp_boxpoints.vertex_min[i] = LocalMap_Points.vertex_max[i] - mov_dist;
-            cub_needrm.push_back(tmp_boxpoints);
-        } else if (dist_to_map_edge[i][1] <= MOV_THRESHOLD * DET_RANGE) {
-            New_LocalMap_Points.vertex_max[i] += mov_dist;
-            New_LocalMap_Points.vertex_min[i] += mov_dist;
-            tmp_boxpoints.vertex_max[i] = LocalMap_Points.vertex_min[i] + mov_dist;
-            cub_needrm.push_back(tmp_boxpoints);
-        }
-    }
-    LocalMap_Points = New_LocalMap_Points;
-
-    PointVector points_history;
-    ikdtree.acquire_removed_points(points_history);
-
-    if (cub_needrm.size() > 0) kdtree_delete_counter = ikdtree.Delete_Point_Boxes(cub_needrm);  // 删除指定范围内的点
-}
-
 // 根据最新估计位姿  增量添加点云到map
 void LaserMapping::map_incremental() {
-    PointCloudXYZI PointToAdd;
-    PointCloudXYZI PointNoNeedDownsample;
-    PointCloudXYZI PointSave;
+    CloudType PointToAdd;
+    CloudType PointNoNeedDownsample;
+    CloudType PointSave;
     PointToAdd.reserve(feats_down_size);
     PointNoNeedDownsample.reserve(feats_down_size);
     for (int i = 0; i < feats_down_size; i++) {
@@ -140,7 +90,7 @@ void LaserMapping::map_incremental() {
         if (!Nearest_Points[i].empty() && flg_EKF_inited) {
             const PointVector& points_near = Nearest_Points[i];
             bool need_add = true;
-            BoxPointType Box_of_Point;
+            // BoxPointType Box_of_Point;
             PointType mid_point;  // 点所在体素的中心
             mid_point.x = floor(p_world.x / filter_size_map_min) * filter_size_map_min + 0.5 * filter_size_map_min;
             mid_point.y = floor(p_world.y / filter_size_map_min) * filter_size_map_min + 0.5 * filter_size_map_min;
@@ -182,10 +132,41 @@ void LaserMapping::map_incremental() {
     }
 }
 
+void LaserMapping::dyna_incremental() {
+    // CloudType PointToAdd;
+    // for (size_t i = 0; i < feats_down_size; ++i) {
+    //     /* decide if need add to map */
+    //     PointType& point_world = feats_down_world->points[i];
+    //     // if (Nearest_Points[i].size())
+    //     if (kf.point_selected_surf[i] != EstiPlane::Prior) {
+    //         PointToAdd.emplace_back(point_world);
+    //     } else {
+    //         // const PointVector &points_near = Nearest_Points[i];
+    //         // if (need_add) {
+    //         //     points_to_add.emplace_back(point_world);
+    //         // }
+    //     }
+    // }
+
+    // int curcnt = 0;
+    // for (int i = 0; i < feats_down_world->size(); i++) {
+    //     if (kf.point_selected_surf[i] == EstiPlane::Cur) curcnt++;
+    // }
+    // std::cout << "curcnt " << curcnt << std::endl;
+
+    // kf.hvox_dyna->AddPoints(PointToAdd);
+    CloudType::Ptr featsFromMap{new CloudType()};
+    kf.hvox_dyna->UpdateProb(*feats_down_world, kf.point_selected_surf, Nearest_Points, *featsFromMap);
+    publish_cloud(pubLaserCloudFlash, featsFromMap);
+
+    //
+    // *featsFromMap = PointToAdd;
+}
+
 std::mutex pcl_save_mutex_;
-void LaserMapping::savemap_callback() {
+void LaserMapping::savemap_callback(const ros::TimerEvent& event) {
     if (pcd_save_en == false || pcl_wait_save->empty()) return;
-    PointCloudXYZI::Ptr pcl_buff_save{new PointCloudXYZI()};
+    CloudType::Ptr pcl_buff_save{new CloudType()};
     {
         std::lock_guard<std::mutex> lock(pcl_save_mutex_);
         *pcl_buff_save = std::move(*pcl_wait_save);
@@ -218,22 +199,8 @@ void LaserMapping::timer_callback() {
 
         flg_EKF_inited = (Measures.lidar_beg_time - first_lidar_time) < INIT_TIME ? false : true;
 
-        // FIXME:
-        if (false) lasermap_fov_segment();  // 更新localmap边界，然后降采样当前帧点云
-
-        PointCloudXYZI::Ptr cloud_flash(new PointCloudXYZI), cloud_norm(new PointCloudXYZI);
-        if (kf.USE_FLASH) {
-            for (auto& pt : feats_undistort->points) {
-                if (pt.intensity > kf.flash_thre)
-                    cloud_flash->points.push_back(pt);
-                else
-                    cloud_norm->points.push_back(pt);
-            }
-            *feats_undistort = std::move(*cloud_norm);
-        }
         downSizeFilterSurf.setInputCloud(feats_undistort);
         downSizeFilterSurf.filter(*feats_down_body);
-        if (kf.USE_FLASH) *feats_down_body += *cloud_flash;
         feats_down_size = feats_down_body->points.size();
         feats_down_world->resize(feats_down_size);
 
@@ -242,17 +209,16 @@ void LaserMapping::timer_callback() {
             return;
         }
 
-        // 初始化ikdtree(ikdtree为空时)
         if (loc_mode == false && ikdtree.Root_Node == nullptr) {
             ikdtree.set_downsample_param(filter_size_map_min);
             for (int i = 0; i < feats_down_size; i++) pointBodyToWorld(&(feats_down_body->points[i]), &(feats_down_world->points[i]));
-            ikdtree.Build(feats_down_world->points);  // 根据世界坐标系下的点构建ikdtree
+            ikdtree.Build(feats_down_world->points);
             return;
         }
 
         double t1 = omp_get_wtime();
         /*** iterated state estimation ***/
-        Nearest_Points.resize(feats_down_size);  // 存储近邻点的vector
+        Nearest_Points.resize(feats_down_size);
         kf.update_iterated_dyn_share_modified(LASER_POINT_COV, feats_down_body, ikdtree, Nearest_Points);
         double t2 = omp_get_wtime();
 
@@ -260,30 +226,38 @@ void LaserMapping::timer_callback() {
         pos_lid = state_point.pos + state_point.rot.matrix() * state_point.offset_T_L_I;
 
         /******* Publish odometry *******/
-        publish_odometry(pubOdomAftMapped, tf_broadcaster);
+        publish_odometry(pubOdomAftMapped);
 
         /*** add the feature points to map kdtree ***/
         for (int i = 0; i < feats_down_size; i++) pointBodyToWorld(&(feats_down_body->points[i]), &(feats_down_world->points[i]));
         if (loc_mode == false) map_incremental();
+        if (kf.USE_DYNA) dyna_incremental();
 
         /******* Publish points *******/
         if (path_en) publish_path(pubPath);
         if (scan_pub_en || pcd_save_en) {
-            publish_frame_world(pubLaserCloudFull);
+            publish_frame_world();
 
-            sensor_msgs::msg::PointCloud2 laserCloudmsg;
+            sensor_msgs::PointCloud2 laserCloudmsg;
             pcl::toROSMsg(*feats_undistort, laserCloudmsg);
-            laserCloudmsg.header.stamp = get_ros_time(lidar_end_time);
+            laserCloudmsg.header.stamp = ros::Time().fromSec(lidar_end_time);
             laserCloudmsg.header.frame_id = "body";
-            pubLaserCloudFull_body->publish(laserCloudmsg);
+            pubLaserCloudFull_body.publish(laserCloudmsg);
         }
         publish_pca(kf.covariance_matrix);
 
         double t3 = omp_get_wtime();
 
         if (runtime_pos_log) {
-            printf("ds: %d match: %d%% ", feats_down_size, (int)(kf.get_match_ratio() * 100));
-            printf("[tim] ICP: %0.2f total: %0.2f", (t2 - t1) * 1000.0, (t3 - t0) * 1000.0);
+            auto& rate = kf.match_rate;
+            printf("ds: %d grid %d [match] all: %.0f%% prior: %.0f%% cur: %.0f%% ", feats_down_size, (int)kf.hvox_dyna->NumValidGrids(), rate.all, rate.prior,
+                   rate.lio);
+            printf("[tim] ICP: %0.2f total: %0.2f ", (t2 - t1) * 1000.0, (t3 - t0) * 1000.0);
+
+            auto& dt = kf.degen_rate;
+            printf("[degen]: %.2f ,%.2f ,%.2f ,%.2f ,%.2f ,%.2f,%.2f ,%.2f,", dt.rate_1, dt.rate_2, dt.pos_min, dt.pos_trace, dt.rot_min, dt.rot_trace,
+                   dt.all_min, dt.all_trace);
+
             std::cout << std::endl;
             if (fp) dump_lio_state_to_log(fp);
         }

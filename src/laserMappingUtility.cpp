@@ -21,80 +21,62 @@ inline bool createDirectoryIfNotExists(const std::string& path) {
 }
 
 void LaserMapping::readParameters() {
-    declare_and_get_parameter<bool>("publish.path_en", path_en, true);
-    declare_and_get_parameter<bool>("publish.scan_publish_en", scan_pub_en, true);
-    // declare_and_get_parameter<bool>("publish.dense_publish_en", dense_pub_en, false);
-    declare_and_get_parameter<bool>("publish.runtime_pos_log", runtime_pos_log, true);
+    nh.param<bool>("publish/path_en", path_en, true);
+    nh.param<bool>("publish/scan_publish_en", scan_pub_en, true);
+    // nh.param<bool>("publish/dense_publish_en", dense_pub_en, false);
+    nh.param<bool>("publish/runtime_pos_log", runtime_pos_log, true);
 
-    declare_and_get_parameter<string>("common.lid_topic", lid_topic, "/livox/lidar");
-    declare_and_get_parameter<string>("common.imu_topic", imu_topic, "/livox/imu");
-    declare_and_get_parameter<bool>("common.time_sync_en", time_sync_en, false);  // 时间同步
-    declare_and_get_parameter<double>("common.time_offset_lidar_to_imu", time_diff_lidar_to_imu, 0.0);
+    nh.param<string>("common/lid_topic", lid_topic, "/livox/lidar");
+    nh.param<string>("common/imu_topic", imu_topic, "/livox/imu");
+    nh.param<bool>("common/time_sync_en", time_sync_en, false);  // 时间同步
+    nh.param<double>("common/time_offset_lidar_to_imu", time_diff_lidar_to_imu, 0.0);
 
-    declare_and_get_parameter<double>("common.filter_size_surf", filter_size_surf_min, 0.5);
-    declare_and_get_parameter<double>("common.filter_size_map", filter_size_map_min, 0.5);
-    declare_and_get_parameter<double>("common.cube_len", cube_len, 200);  // 地图的局部区域的长度（FastLio2论文中有解释）
+    nh.param<double>("common/filter_size_surf", filter_size_surf_min, 0.5);
+    nh.param<double>("common/filter_size_map", filter_size_map_min, 0.5);
 
-    declare_and_get_parameter<int>("kf.maximum_iter", kf.maximum_iter, 4);  // 卡尔曼滤波的最大迭代次数
-    declare_and_get_parameter<double>("kf.epsi", kf.epsi, 0.001);
-    declare_and_get_parameter<int>("kf.NUM_MATCH_POINTS", kf.NUM_MATCH_POINTS, 5);
-    declare_and_get_parameter<float>("kf.plane_thr", kf.plane_thr, 0.1);
-    declare_and_get_parameter<float>("kf.plane_thr_min", kf.plane_thr_min, 0);
-    declare_and_get_parameter<bool>("kf.extrinsic_est", kf.extrinsic_est, false);
+    nh.param<int>("kf/maximum_iter", kf.maximum_iter, 4);
+    nh.param<double>("kf/epsi", kf.epsi, 0.001);
+    nh.param<int>("kf/NUM_MATCH_POINTS", kf.NUM_MATCH_POINTS, 5);
+    nh.param<float>("kf/plane_thr", kf.plane_thr, 0.1);
 
-    declare_and_get_parameter<float>("mapping.det_range", DET_RANGE, 300.f);    // 激光雷达的最大探测范围
-    declare_and_get_parameter<double>("mapping.gyr_cov", gyr_cov, 0.1);         // IMU陀螺仪的协方差
-    declare_and_get_parameter<double>("mapping.acc_cov", acc_cov, 0.1);         // IMU加速度计的协方差
-    declare_and_get_parameter<double>("mapping.b_gyr_cov", b_gyr_cov, 0.0001);  // IMU陀螺仪偏置的协方差
-    declare_and_get_parameter<double>("mapping.b_acc_cov", b_acc_cov, 0.0001);  // IMU加速度计偏置的协方差
+    nh.param<double>("mapping/gyr_cov", gyr_cov, 0.1);         // IMU陀螺仪的协方差
+    nh.param<double>("mapping/acc_cov", acc_cov, 0.1);         // IMU加速度计的协方差
+    nh.param<double>("mapping/b_gyr_cov", b_gyr_cov, 0.0001);  // IMU陀螺仪偏置的协方差
+    nh.param<double>("mapping/b_acc_cov", b_acc_cov, 0.0001);  // IMU加速度计偏置的协方差
 
     std::vector<double> extrinT(3, 0.0);
     std::vector<double> extrinR(9, 0.0);
-    declare_and_get_parameter<vector<double>>("mapping.extrinsic_T", extrinT, vector<double>(3, 0));  // 雷达相对于IMU的外参T（即雷达在IMU坐标系中的坐标）
-    declare_and_get_parameter<vector<double>>("mapping.extrinsic_R", extrinR, vector<double>(9, 0));  // 雷达相对于IMU的外参R
+    nh.param<vector<double>>("mapping/extrinsic_T", extrinT, vector<double>(3, 0));  // 雷达相对于IMU的外参T（即雷达在IMU坐标系中的坐标）
+    nh.param<vector<double>>("mapping/extrinsic_R", extrinR, vector<double>(9, 0));  // 雷达相对于IMU的外参R
     Lidar_T_wrt_IMU << VEC_FROM_ARRAY(extrinT);
     Lidar_R_wrt_IMU << MAT_FROM_ARRAY(extrinR);
 
-    // Wheel
-    declare_and_get_parameter<bool>("wheel.use_wheel", USE_WHEEL, false);
-    declare_and_get_parameter<string>("wheel.wheel_topic", wheel_topic, "/agv_connect/carOdometry");
-    declare_and_get_parameter<double>("wheel.wheel_cov", p_imu->wheel_cov, 0.01);
-    declare_and_get_parameter<vector<double>>("wheel.extrinsic_T", extrinT, vector<double>(3, 0));
-    declare_and_get_parameter<vector<double>>("wheel.extrinsic_R", extrinR, vector<double>(9, 0));
-    kf.Wheel_T_wrt_IMU << VEC_FROM_ARRAY(extrinT);
-    kf.Wheel_R_wrt_IMU << MAT_FROM_ARRAY(extrinR);
+    // Dyna
+    int ivox_capacity;
+    double ivox_resolution;
+    nh.param<bool>("dyna/en", kf.USE_DYNA, false);
+    nh.param<int>("dyna/ivox_capacity", ivox_capacity, 10000);
+    nh.param<double>("dyna/ivox_resolution", ivox_resolution, 0.25);
+    nh.param<bool>("dyna/use_chi", kf.use_chi, false);
+    nh.param<double>("dyna/chi_square_critical", kf.chi_square_critical, 3.84);
 
-    // GNSS
-    declare_and_get_parameter<bool>("gnss.use_gnss", USE_GNSS, false);
-    declare_and_get_parameter<string>("gnss.gnss_topic", gnss_topic, "/gps/fix");
-    declare_and_get_parameter<double>("gnss.gnss_cov", p_imu->gnss_cov, 0.05);
-    declare_and_get_parameter<int>("gnss.gnss_mode", kf.gnss_mode, 0);
+    HVox<PointType>::Options ivox_options_;
+    ivox_options_.nearby_type_ = HVox<PointType>::NearbyType::NEARBY6;
+    ivox_options_.res_ = ivox_resolution;
+    ivox_options_.capacity_ = ivox_capacity;
+    kf.hvox_dyna = std::make_shared<HVox<PointType>>(ivox_options_);
 
-    // Flash
-    std::string flash_path;
-    declare_and_get_parameter<bool>("flash.use_flash", kf.USE_FLASH, false);
-    declare_and_get_parameter<string>("flash.flash_path", flash_path, string(ROOT_DIR) + "PCD/cloudFlash.pcd");
-    // declare_and_get_parameter<double>("flash.flash_cov", kf.flash_cov, 0.01);
-    declare_and_get_parameter<double>("flash.flash_dis_thr", kf.flash_dis_thr, 0.2);
-    declare_and_get_parameter<int>("flash.flash_thre", kf.flash_thre, 100);
-    if (kf.USE_FLASH) {
-        if (pcl::io::loadPCDFile<PointType>(flash_path, *kf.cloudFlash) == -1)
-            std::cerr << "Read fail! " << flash_path << std::endl;
-        else {
-            kf.flashTree->setInputCloud(kf.cloudFlash);
-        }
-    }
+    nh.param<double>("preprocess/blind", p_pre->blind, 0.01);  // 最小距离阈值，即过滤掉0～blind范围内的点云
+    nh.param<double>("preprocess/max_range", p_pre->max_range, 100.0);
+    nh.param<int>("preprocess/lidar_type", p_pre->lidar_type, AVIA);  // 激光雷达的类型
+    nh.param<int>("preprocess/scan_line", p_pre->N_SCANS, 16);        // 激光雷达扫描的线数（livox avia为6线）
+    nh.param<int>("preprocess/timestamp_unit", p_pre->time_unit, US);
+    nh.param<int>("preprocess/scan_rate", p_pre->SCAN_RATE, 10);
+    nh.param<int>("preprocess/point_filter_num", p_pre->point_filter_num, 2);  // 采样间隔，即每隔point_filter_num个点取1个点
 
-    declare_and_get_parameter<double>("preprocess.blind", p_pre->blind, 0.01);         // 最小距离阈值，即过滤掉0～blind范围内的点云
-    declare_and_get_parameter<int>("preprocess.lidar_type", p_pre->lidar_type, AVIA);  // 激光雷达的类型
-    declare_and_get_parameter<int>("preprocess.scan_line", p_pre->N_SCANS, 16);        // 激光雷达扫描的线数（livox avia为6线）
-    declare_and_get_parameter<int>("preprocess.timestamp_unit", p_pre->time_unit, US);
-    declare_and_get_parameter<int>("preprocess.scan_rate", p_pre->SCAN_RATE, 10);
-    declare_and_get_parameter<int>("preprocess.point_filter_num", p_pre->point_filter_num, 2);  // 采样间隔，即每隔point_filter_num个点取1个点
-
-    declare_and_get_parameter<int>("pcd_save.pcd_save_en", pcd_save_en, false);
-    declare_and_get_parameter<double>("pcd_save.filter_size_savemap", filter_size_savemap, 0.2);
-    declare_and_get_parameter<string>("pcd_save.savemap_dir", savemap_dir, string(ROOT_DIR) + "PCD/");
+    nh.param<int>("pcd_save/pcd_save_en", pcd_save_en, false);
+    nh.param<double>("pcd_save/filter_size_savemap", filter_size_savemap, 0.2);
+    nh.param<string>("pcd_save/savemap_dir", savemap_dir, string(ROOT_DIR) + "PCD/");
     downSizeFilterSaveMap.setLeafSize(filter_size_savemap, filter_size_savemap, filter_size_savemap);
 
     createDirectoryIfNotExists(savemap_dir);
@@ -105,34 +87,30 @@ void LaserMapping::readParameters() {
     fout_traj.precision(6);
 }
 
-void LaserMapping::standard_pcl_cbk(const sensor_msgs::msg::PointCloud2::UniquePtr msg) {
+void LaserMapping::standard_pcl_cbk(const sensor_msgs::PointCloud2::ConstPtr& msg) {
     mtx_buffer.lock();
-
-    double cur_time = get_time_sec(msg->header.stamp);
     double preprocess_start_time = omp_get_wtime();
-    if (get_time_sec(msg->header.stamp) < last_timestamp_lidar) {
-        std::cerr << "lidar loop back, clear buffer" << std::endl;
+    if (msg->header.stamp.toSec() < last_timestamp_lidar) {
+        ROS_ERROR("lidar loop back, clear buffer");
         lidar_buffer.clear();
     }
 
-    PointCloudXYZI::Ptr ptr(new PointCloudXYZI());
+    CloudType::Ptr ptr(new CloudType());
     p_pre->process(msg, ptr);
     lidar_buffer.push_back(ptr);
-    time_buffer.push_back(cur_time);
-    last_timestamp_lidar = cur_time;
+    time_buffer.push_back(msg->header.stamp.toSec());
+    last_timestamp_lidar = msg->header.stamp.toSec();
     mtx_buffer.unlock();
-    // sig_buffer.notify_all();
 }
 
-void LaserMapping::livox_pcl_cbk(const livox_ros_driver2::msg::CustomMsg::UniquePtr msg) {
+void LaserMapping::livox_pcl_cbk(const livox_ros_driver::CustomMsg::ConstPtr& msg) {
     mtx_buffer.lock();
     double preprocess_start_time = omp_get_wtime();
-
-    if (get_time_sec(msg->header.stamp) < last_timestamp_lidar) {
-        std::cerr << "lidar loop back, clear buffer" << std::endl;
+    if (msg->header.stamp.toSec() < last_timestamp_lidar) {
+        ROS_ERROR("lidar loop back, clear buffer");
         lidar_buffer.clear();
     }
-    last_timestamp_lidar = get_time_sec(msg->header.stamp);
+    last_timestamp_lidar = msg->header.stamp.toSec();
 
     if (!time_sync_en && abs(last_timestamp_imu - last_timestamp_lidar) > 10.0 && !imu_buffer.empty() && !lidar_buffer.empty()) {
         printf("IMU and LiDAR not Synced, IMU time: %lf, lidar header time: %lf \n", last_timestamp_imu, last_timestamp_lidar);
@@ -144,29 +122,29 @@ void LaserMapping::livox_pcl_cbk(const livox_ros_driver2::msg::CustomMsg::Unique
         printf("Self sync IMU and LiDAR, time diff is %.10lf \n", timediff_lidar_wrt_imu);
     }
 
-    PointCloudXYZI::Ptr ptr(new PointCloudXYZI());
+    CloudType::Ptr ptr(new CloudType());
     p_pre->process(msg, ptr);
     lidar_buffer.push_back(ptr);
     time_buffer.push_back(last_timestamp_lidar);
 
     mtx_buffer.unlock();
-    // sig_buffer.notify_all();
 }
 
-void LaserMapping::imu_cbk(const sensor_msgs::msg::Imu::UniquePtr msg_in) {
-    sensor_msgs::msg::Imu::SharedPtr msg(new sensor_msgs::msg::Imu(*msg_in));
+void LaserMapping::imu_cbk(const sensor_msgs::Imu::ConstPtr& msg_in) {
+    sensor_msgs::Imu::Ptr msg(new sensor_msgs::Imu(*msg_in));
 
-    msg->header.stamp = get_ros_time(get_time_sec(msg_in->header.stamp) - time_diff_lidar_to_imu);
     if (abs(timediff_lidar_wrt_imu) > 0.1 && time_sync_en) {
-        msg->header.stamp = rclcpp::Time(timediff_lidar_wrt_imu + get_time_sec(msg_in->header.stamp));
+        msg->header.stamp = ros::Time().fromSec(timediff_lidar_wrt_imu + msg_in->header.stamp.toSec());
     }
 
-    double timestamp = get_time_sec(msg->header.stamp);
+    msg->header.stamp = ros::Time().fromSec(msg_in->header.stamp.toSec() - time_diff_lidar_to_imu);
+
+    double timestamp = msg->header.stamp.toSec();
 
     mtx_buffer.lock();
 
     if (timestamp < last_timestamp_imu) {
-        std::cerr << "lidar loop back, clear buffer" << std::endl;
+        ROS_WARN("imu loop back, clear buffer");
         imu_buffer.clear();
     }
 
@@ -175,59 +153,6 @@ void LaserMapping::imu_cbk(const sensor_msgs::msg::Imu::UniquePtr msg_in) {
     imu_buffer.push_back(msg);
     mtx_buffer.unlock();
     // sig_buffer.notify_all();
-}
-
-void LaserMapping::wheel_cbk(const nav_msgs::msg::Odometry::UniquePtr msg_in) {
-    nav_msgs::msg::Odometry::SharedPtr msg(new nav_msgs::msg::Odometry(*msg_in));
-
-    double timestamp = get_time_sec(msg->header.stamp);
-
-    mtx_buffer.lock();
-    if (timestamp < last_timestamp_wheel) {
-        std::cerr << "wheel loop back, clear buffer" << std::endl;
-        wheel_buffer.clear();
-    }
-    last_timestamp_wheel = timestamp;
-
-    wheel_buffer.push_back(msg);
-    mtx_buffer.unlock();
-}
-
-void LaserMapping::gnss_cbk(const sensor_msgs::msg::NavSatFix::UniquePtr msg_in) {
-    static bool gnss_inited = false;
-    double timestamp = get_time_sec(msg_in->header.stamp);
-
-    mtx_buffer.lock();
-    // 没有进行时间纠正
-    if (timestamp < last_timestamp_gnss) {
-        std::cerr << "gnss loop back, clear buffer" << std::endl;
-        gnss_buffer.clear();
-    }
-    mtx_buffer.unlock();
-
-    last_timestamp_gnss = timestamp;
-
-    if (!gnss_inited) {  //  初始化位置
-        geo_converter.Reset(msg_in->latitude, msg_in->longitude, msg_in->altitude);
-        gnss_inited = true;
-    } else {
-        double local_E = 0, local_N = 0, local_U = 0;  // WGS84 -> ENU
-        geo_converter.Forward(msg_in->latitude, msg_in->longitude, msg_in->altitude, local_E, local_N, local_U);
-
-        V3D gnss_pose(local_E, local_N, local_U);
-        // gnss_pose = Gnss_R_wrt_IMU.transpose() * (gnss_pose - Gnss_T_wrt_IMU);  // convert gnss_pose to IMU frame
-
-        nav_msgs::msg::Odometry::SharedPtr gnss_data_enu(new nav_msgs::msg::Odometry());
-        gnss_data_enu->header.stamp = msg_in->header.stamp;  // rclcpp::Time(timestamp * 1e9);
-        gnss_data_enu->pose.pose.position.x = gnss_pose(0);  // 东
-        gnss_data_enu->pose.pose.position.y = gnss_pose(1);  // 北
-        gnss_data_enu->pose.pose.position.z = gnss_pose(2);  // 天
-
-        gnss_data_enu->pose.covariance[0] = msg_in->position_covariance[0];  // Heading
-        gnss_data_enu->pose.covariance[4] = msg_in->status.status;           // 状态
-
-        gnss_buffer.push_back(gnss_data_enu);
-    }
 }
 
 // 把当前要处理的LIDAR和IMU数据打包到meas
@@ -259,39 +184,13 @@ bool LaserMapping::sync_packages(MeasureGroup& meas) {
     if (last_timestamp_imu < lidar_end_time) return false;
 
     /*** push imu data, and pop from imu buffer ***/
-    double imu_time = get_time_sec(imu_buffer.front()->header.stamp);
+    double imu_time = imu_buffer.front()->header.stamp.toSec();
     meas.imu.clear();
     while ((!imu_buffer.empty()) && (imu_time < lidar_end_time)) {
-        imu_time = get_time_sec(imu_buffer.front()->header.stamp);
+        imu_time = imu_buffer.front()->header.stamp.toSec();
         if (imu_time > lidar_end_time) break;
         meas.imu.push_back(imu_buffer.front());
         imu_buffer.pop_front();
-    }
-
-    /*** find the closet wheel frame to the last imu frame ***/
-    if (USE_WHEEL && !wheel_buffer.empty()) {
-        meas.wheel.clear();
-        double wheel_time = get_time_sec(wheel_buffer.front()->header.stamp);
-        // 记录wheel数据，wheel时间小于当前帧lidar结束时间
-        while ((!wheel_buffer.empty()) && (wheel_time < lidar_end_time)) {
-            wheel_time = get_time_sec(wheel_buffer.front()->header.stamp);
-            if (wheel_time > lidar_end_time) break;
-            meas.wheel.push_back(wheel_buffer.front());  // 记录当前lidar帧内的wheel数据到meas.wheel
-            wheel_buffer.pop_front();
-        }
-    }
-
-    /*** find the closet gnss frame to the last imu frame ***/
-    if (USE_GNSS && !gnss_buffer.empty()) {
-        meas.gnss.clear();
-        double gnss_time = get_time_sec(gnss_buffer.front()->header.stamp);
-        // 记录gnss数据，gnss时间小于当前帧lidar结束时间
-        while ((!gnss_buffer.empty()) && (gnss_time < lidar_end_time)) {
-            gnss_time = get_time_sec(gnss_buffer.front()->header.stamp);
-            if (gnss_time > lidar_end_time) break;
-            meas.gnss.push_back(gnss_buffer.front());  // 记录当前lidar帧内的gnss数据到meas.gnss
-            gnss_buffer.pop_front();
-        }
     }
 
     lidar_buffer.pop_front();
@@ -300,41 +199,39 @@ bool LaserMapping::sync_packages(MeasureGroup& meas) {
     return true;
 }
 
-void LaserMapping::publish_frame_world(rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pubLaserCloudFull) {
-    PointCloudXYZI::Ptr laserCloudEffect(new PointCloudXYZI());
-    PointCloudXYZI::Ptr laserCloudNonEffect(new PointCloudXYZI());
+void LaserMapping::publish_frame_world() {
+    CloudType::Ptr laserCloudEffect(new CloudType());
+    CloudType::Ptr laserCloudNonEffect(new CloudType());
 
-    if (scan_pub_en) {
-        int slow = 0;
-        for (int i = 0; i < feats_down_world->size(); i++) {
-            auto& pt = feats_down_world->points[i];
-            if (i == kf.effect_idx[slow]) {
-                laserCloudEffect->push_back(pt);
-                slow++;
-            } else
-                laserCloudNonEffect->push_back(pt);
-        }
-
-        publish_cloud(pubLaserCloudEffect, laserCloudEffect);
-        publish_cloud(pubLaserCloudFull, laserCloudNonEffect);
+    int slow = 0;
+    for (int i = 0; i < feats_down_world->size(); i++) {
+        auto& pt = feats_down_world->points[i];
+        if (i == kf.effect_idx[slow]) {
+            laserCloudEffect->push_back(pt);
+            slow++;
+        } else
+            laserCloudNonEffect->push_back(pt);
     }
+
+    publish_cloud(pubLaserCloudEffect, laserCloudEffect);
+    publish_cloud(pubLaserCloudNoEffect, laserCloudNonEffect);
+    publish_cloud(pubLaserCloudFull, feats_down_world);
 }
 
-void LaserMapping::publish_cloud(rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pubLaserCloudMap, const PointCloudXYZI::Ptr& cloud) {
-    sensor_msgs::msg::PointCloud2 laserCloudMap;
+void LaserMapping::publish_cloud(const ros::Publisher& pubLaserCloudMap, const CloudType::Ptr& cloud) {
+    sensor_msgs::PointCloud2 laserCloudMap;
     pcl::toROSMsg(*cloud, laserCloudMap);
-    laserCloudMap.header.stamp = get_ros_time(lidar_end_time);
+    laserCloudMap.header.stamp = ros::Time().fromSec(lidar_end_time);
     laserCloudMap.header.frame_id = "camera_init";
-    pubLaserCloudMap->publish(laserCloudMap);
+    pubLaserCloudMap.publish(laserCloudMap);
 }
 
-void LaserMapping::publish_odometry(const rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr pubOdomAftMapped,
-                                    std::unique_ptr<tf2_ros::TransformBroadcaster>& tf_br) {
+void LaserMapping::publish_odometry(const ros::Publisher& pubOdomAftMapped) {
     odomAftMapped.header.frame_id = "camera_init";
     odomAftMapped.child_frame_id = "body";
-    odomAftMapped.header.stamp = get_ros_time(lidar_end_time);
+    odomAftMapped.header.stamp = ros::Time().fromSec(lidar_end_time);
     set_posestamp(odomAftMapped.pose);
-    pubOdomAftMapped->publish(odomAftMapped);
+    pubOdomAftMapped.publish(odomAftMapped);
     auto P = kf.get_P();
     for (int i = 0; i < 6; i++) {
         int k = i < 3 ? i + 3 : i - 3;
@@ -346,22 +243,21 @@ void LaserMapping::publish_odometry(const rclcpp::Publisher<nav_msgs::msg::Odome
         odomAftMapped.pose.covariance[i * 6 + 5] = P(k, 2);
     }
 
-    geometry_msgs::msg::TransformStamped trans;
-    trans.header.frame_id = "camera_init";
-    trans.child_frame_id = "body";
-    trans.transform.translation.x = odomAftMapped.pose.pose.position.x;
-    trans.transform.translation.y = odomAftMapped.pose.pose.position.y;
-    trans.transform.translation.z = odomAftMapped.pose.pose.position.z;
-    trans.transform.rotation.w = odomAftMapped.pose.pose.orientation.w;
-    trans.transform.rotation.x = odomAftMapped.pose.pose.orientation.x;
-    trans.transform.rotation.y = odomAftMapped.pose.pose.orientation.y;
-    trans.transform.rotation.z = odomAftMapped.pose.pose.orientation.z;
-    tf_br->sendTransform(trans);
+    static tf::TransformBroadcaster br;
+    tf::Transform transform;
+    tf::Quaternion q;
+    transform.setOrigin(tf::Vector3(odomAftMapped.pose.pose.position.x, odomAftMapped.pose.pose.position.y, odomAftMapped.pose.pose.position.z));
+    q.setW(odomAftMapped.pose.pose.orientation.w);
+    q.setX(odomAftMapped.pose.pose.orientation.x);
+    q.setY(odomAftMapped.pose.pose.orientation.y);
+    q.setZ(odomAftMapped.pose.pose.orientation.z);
+    transform.setRotation(q);
+    br.sendTransform(tf::StampedTransform(transform, odomAftMapped.header.stamp, "camera_init", "body"));
 }
 
-void LaserMapping::publish_path(rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr pubPath) {
+void LaserMapping::publish_path(const ros::Publisher& pubPath) {
     set_posestamp(msg_body_pose);
-    msg_body_pose.header.stamp = rclcpp::Time(lidar_end_time);
+    msg_body_pose.header.stamp = ros::Time().fromSec(lidar_end_time);
     msg_body_pose.header.frame_id = "camera_init";
 
     /*** if path is too large, the rvis will crash ***/
@@ -369,7 +265,7 @@ void LaserMapping::publish_path(rclcpp::Publisher<nav_msgs::msg::Path>::SharedPt
     jjj++;
     if (jjj % 10 == 0) {
         path.poses.push_back(msg_body_pose);
-        pubPath->publish(path);
+        pubPath.publish(path);
     }
 }
 
@@ -378,13 +274,13 @@ void LaserMapping::publish_pca(const Eigen::Matrix3d& covariance_matrix) {
     Eigen::Vector3d eigenvalues = eigensolver.eigenvalues();
     Eigen::Matrix3d eigenvectors = eigensolver.eigenvectors();
 
-    visualization_msgs::msg::Marker marker;
+    visualization_msgs::Marker marker;
     marker.header.frame_id = "camera_init";
-    marker.header.stamp = get_ros_time(lidar_end_time);
+    marker.header.stamp = ros::Time().fromSec(lidar_end_time);
     marker.ns = "pca";
     marker.id = 0;
-    marker.type = visualization_msgs::msg::Marker::SPHERE;
-    marker.action = visualization_msgs::msg::Marker::ADD;
+    marker.type = visualization_msgs::Marker::SPHERE;
+    marker.action = visualization_msgs::Marker::ADD;
 
     // Marker位置
     marker.pose.position.x = pos_lid.x();
@@ -416,9 +312,9 @@ void LaserMapping::publish_pca(const Eigen::Matrix3d& covariance_matrix) {
     marker.color.b = 0.0f;
     marker.color.a = 0.5f;
 
-    marker.lifetime = rclcpp::Duration(0);
+    // marker.lifetime = rclcpp::Duration(0);
 
-    marker_pub_->publish(marker);
+    marker_pub_.publish(marker);
 }
 
 void LaserMapping::dump_lio_state_to_log(FILE* fp) {
@@ -430,27 +326,14 @@ void LaserMapping::dump_lio_state_to_log(FILE* fp) {
     fprintf(fp, "%lf ,%lf ,%lf ,", x_.pos(0), x_.pos(1), x_.pos(2));     // Pos
     fprintf(fp, "%lf ,%lf ,%lf ,", x_.vel(0), x_.vel(1), x_.vel(2));     // Vel
 
-    fprintf(fp, "  - ,");
-    Eigen::Vector3d transformed_velocity = kf.Trans_Vel;  // kf.Wheel_R_wrt_IMU * x_.rot.matrix() * p_imu->wheel_velocity;            //* x_.rot.matrix()
-    fprintf(fp, "%lf ,%lf ,%lf ,", p_imu->wheel_velocity.x(), transformed_velocity.x(), transformed_velocity.y());  // Vel
-
-    fprintf(fp, "  - ,");
-    double gps_heading = p_imu->gps_pos.covariance[0];  // GPS Heading + 90 = 原始车头的Heading -  当前角度 = 应该旋转的角度
-    int status = p_imu->gps_pos.covariance[4];
-    auto&& position = p_imu->gps_pos.pose.position;
-    V3D gnss_pos(position.x, position.y, position.z);
-    auto pos_w2imu = x_.offset_R_G_I.matrix() * gnss_pos;
-    fprintf(fp, "%lf ,%lf ,%lf ,", pos_w2imu(0), pos_w2imu(1), pos_w2imu(2));  // Pos
-
-    // fprintf(fp, "  - ,");
-    // fprintf(fp, "%lf ,%lf ,%lf ,", p_imu->gnss_pos(0), p_imu->gnss_pos(1), p_imu->gnss_pos(2));  // Pos
-
-    fprintf(fp, "  - ,");
-    rot_ang = x_.offset_R_G_I.matrix().eulerAngles(0, 1, 2);
-    fprintf(fp, "%lf ,%lf ,", gps_heading, RAD2DEG(rot_ang(2)));
-    if (status != 4) fprintf(fp, "%lf ,", (double)status);
-
     // Debug
+    fprintf(fp, "%d , - ,", feats_down_size);
+    auto& rt = kf.match_rate;
+    fprintf(fp, "%.3f ,%.3f ,%.3f,", rt.all, rt.lio, rt.prior);
+    auto& dt = kf.degen_rate;
+    fprintf(fp, "%.2f ,%.2f ,", dt.rate_1, dt.rate_2);
+    fprintf(fp, "%.2f ,%.2f ,%.2f,%.2f ,%.2f ,%.2f,", dt.pos_min, dt.pos_trace, dt.rot_min, dt.rot_trace, dt.all_min, dt.all_trace);
+
     // fprintf(fp, "%d ,%d , ,", feats_down_size, (int)(kf.get_match_ratio() * 100));
     // fprintf(fp, "%lf ,%lf ,%lf ,", x_.bg(0), x_.bg(1), x_.bg(2));       // Bias_g
     // fprintf(fp, "%lf ,%lf ,%lf ,", x_.ba(0), x_.ba(1), x_.ba(2));       // Bias_a

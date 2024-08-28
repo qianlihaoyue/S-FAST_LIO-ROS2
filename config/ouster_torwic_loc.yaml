@@ -1,0 +1,62 @@
+
+common:
+    lid_topic:  "/os_cloud_node/points"
+    imu_topic:  "/os_cloud_node/imu"
+    # time_offset_lidar_to_imu : -1655306014.614445
+
+    filter_size_surf: 0.25
+    filter_size_map: 0.25
+
+kf:
+    maximum_iter: 4
+    epsi: 0.001
+    NUM_MATCH_POINTS: 5
+    plane_thr: 0.1
+
+dyna:
+    en: false
+    ivox_resolution: 0.25
+    use_chi: false
+    chi_square_critical: 3  # 3.84 - 95%   2.71 - 90%   1.64 - 80%    1.07 - 70%    0.708 - 60%  0.455 - 50%
+
+
+loc:
+    en: true
+    loadmap_dir: /home/qianliyue/D:/RepoMy/save/paper/mTorGT/
+    # init_guess: [0., 0., 0., 0., 0., 0.]  # [r, p, y , x, y, z] (rad)
+    init_guess: [0., 0., 0., 1.277916, -1.344928, 0.237858]  # 12.10
+
+
+preprocess:
+    lidar_type: 3               
+    scan_line: 128
+    blind: 2.0
+    point_filter_num: 1
+    timestamp_unit: 3
+
+mapping:
+    acc_cov: 0.1
+    gyr_cov: 0.1
+    b_acc_cov: 0.0001
+    b_gyr_cov: 0.0001
+
+    # extrinsic_T: [ -0.06253, 0.11775, -0.07645 ]
+    extrinsic_T: [ 0.0, 0.0, 0.0 ]       
+    extrinsic_R: [ 1., 0., 0.,
+                    0., 1., 0.,
+                    0., 0., 1.]
+
+
+publish:
+    path_en:  true
+    scan_publish_en:  true       # false: close all the point cloud output
+    dense_publish_en: true       # false: low down the points number in a global-frame point clouds scan.
+    runtime_pos_log: true
+
+
+pcd_save:
+    pcd_save_en: 0  # 0 1(one pcd)  2()
+    filter_size_savemap: 0.1
+    savemap_dir: /home/qianliyue/D:/RepoMy/save/paper/lTorwic/
+    
+    

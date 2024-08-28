@@ -10,10 +10,10 @@ ImuProcess::ImuProcess() : b_first_frame_(true), imu_need_init_(true), start_tim
     cov_bias_acc = V3D(0.0001, 0.0001, 0.0001);  // 加速度bias协方差初始化
     mean_acc = V3D(0, 0, -1.0);
     mean_gyr = V3D(0, 0, 0);
-    angvel_last = Zero3d;                          // 上一帧角速度初始化
-    Lidar_T_wrt_IMU = Zero3d;                      // lidar到IMU的位置外参初始化
-    Lidar_R_wrt_IMU = Eye3d;                       // lidar到IMU的旋转外参初始化
-    last_imu_.reset(new sensor_msgs::msg::Imu());  // 上一帧imu初始化
+    angvel_last = Zero3d;                     // 上一帧角速度初始化
+    Lidar_T_wrt_IMU = Zero3d;                 // lidar到IMU的位置外参初始化
+    Lidar_R_wrt_IMU = Eye3d;                  // lidar到IMU的旋转外参初始化
+    last_imu_.reset(new sensor_msgs::Imu());  // 上一帧imu初始化
 }
 
 ImuProcess::~ImuProcess() {}
@@ -24,12 +24,12 @@ void ImuProcess::Reset()  // 重置参数
     mean_acc = V3D(0, 0, -1.0);
     mean_gyr = V3D(0, 0, 0);
     angvel_last = Zero3d;
-    imu_need_init_ = true;                         // 是否需要初始化imu
-    start_timestamp_ = -1;                         // 开始时间戳
-    init_iter_num = 1;                             // 初始化迭代次数
-    IMUpose.clear();                               // imu位姿清空
-    last_imu_.reset(new sensor_msgs::msg::Imu());  // 上一帧imu初始化
-    cur_pcl_un_.reset(new PointCloudXYZI());       // 当前帧点云未去畸变初始化
+    imu_need_init_ = true;                    // 是否需要初始化imu
+    start_timestamp_ = -1;                    // 开始时间戳
+    init_iter_num = 1;                        // 初始化迭代次数
+    IMUpose.clear();                          // imu位姿清空
+    last_imu_.reset(new sensor_msgs::Imu());  // 上一帧imu初始化
+    cur_pcl_un_.reset(new CloudType());  // 当前帧点云未去畸变初始化
 }
 
 // 传入外部参数
@@ -98,12 +98,12 @@ void ImuProcess::IMU_init(const MeasureGroup& meas, esekfom::esekf& kf_state, in
 }
 
 // 反向传播
-void ImuProcess::UndistortPcl(MeasureGroup& meas, esekfom::esekf& kf_state, PointCloudXYZI& pcl_out) {
+void ImuProcess::UndistortPcl(MeasureGroup& meas, esekfom::esekf& kf_state, CloudType& pcl_out) {
     /***将上一帧最后尾部的imu添加到当前帧头部的imu ***/
-    auto v_imu = meas.imu;                                                  // 取出当前帧的IMU队列
-    v_imu.push_front(last_imu_);                                            // 将上一帧最后尾部的imu添加到当前帧头部的imu
-    const double& imu_end_time = get_time_sec(v_imu.back()->header.stamp);  // 拿到当前帧尾部的imu的时间
-    const double& pcl_beg_time = meas.lidar_beg_time;                       // 点云开始和结束的时间戳
+    auto v_imu = meas.imu;                                            // 取出当前帧的IMU队列
+    v_imu.push_front(last_imu_);                                      // 将上一帧最后尾部的imu添加到当前帧头部的imu
+    const double& imu_end_time = v_imu.back()->header.stamp.toSec();  // 拿到当前帧尾部的imu的时间
+    const double& pcl_beg_time = meas.lidar_beg_time;                 // 点云开始和结束的时间戳
     const double& pcl_end_time = meas.lidar_end_time;
 
     // 根据点云中每个点的时间戳对点云进行重排序
@@ -127,7 +127,7 @@ void ImuProcess::UndistortPcl(MeasureGroup& meas, esekfom::esekf& kf_state, Poin
         auto&& head = *(it_imu);      // 拿到当前帧的imu数据
         auto&& tail = *(it_imu + 1);  // 拿到下一帧的imu数据
         // 判断时间先后顺序：下一帧时间戳是否小于上一帧结束时间戳 不符合直接continue
-        if (get_time_sec(tail->header.stamp) < last_lidar_end_time_) continue;
+        if (tail->header.stamp.toSec() < last_lidar_end_time_) continue;
 
         angvel_avr << 0.5 * (head->angular_velocity.x + tail->angular_velocity.x),  // 中值积分
             0.5 * (head->angular_velocity.y + tail->angular_velocity.y), 0.5 * (head->angular_velocity.z + tail->angular_velocity.z);
@@ -137,10 +137,10 @@ void ImuProcess::UndistortPcl(MeasureGroup& meas, esekfom::esekf& kf_state, Poin
         acc_avr = acc_avr * G_m_s2 / mean_acc.norm();  // 通过重力数值对加速度进行调整(除上初始化的IMU大小*9.8)
 
         // 如果IMU开始时刻早于上次雷达最晚时刻(因为将上次最后一个IMU插入到此次开头了，所以会出现一次这种情况)
-        if (get_time_sec(head->header.stamp) < last_lidar_end_time_) {
-            dt = get_time_sec(tail->header.stamp) - last_lidar_end_time_;  // 从上次雷达时刻末尾开始传播 计算与此次IMU结尾之间的时间差
+        if (head->header.stamp.toSec() < last_lidar_end_time_) {
+            dt = tail->header.stamp.toSec() - last_lidar_end_time_;  // 从上次雷达时刻末尾开始传播 计算与此次IMU结尾之间的时间差
         } else {
-            dt = get_time_sec(tail->header.stamp) - get_time_sec(head->header.stamp);  // 两个IMU时刻之间的时间间隔
+            dt = tail->header.stamp.toSec() - head->header.stamp.toSec();  // 两个IMU时刻之间的时间间隔
         }
 
         in.acc = acc_avr;  // 两帧IMU的中值作为输入in  用于前向传播
@@ -151,71 +151,6 @@ void ImuProcess::UndistortPcl(MeasureGroup& meas, esekfom::esekf& kf_state, Poin
         Q.block<3, 3>(9, 9).diagonal() = cov_bias_acc;
 
         kf_state.predict(dt, Q, in);  // IMU前向传播，每次传播的时间间隔为dt
-
-        /*** update by wheel meas ***/
-
-        // static double last_wheel_time = 0;
-        if (!meas.wheel.empty()) {
-            // 掐头
-            while (meas.wheel.size() && get_time_sec(meas.wheel.front()->header.stamp) < get_time_sec(head->header.stamp)) {
-                meas.wheel.pop_front();
-            }
-
-            // wheel 位于两个imu之间
-            while (meas.wheel.size() && get_time_sec(meas.wheel.front()->header.stamp) < get_time_sec(tail->header.stamp)) {
-                auto&& wdata = meas.wheel.front()->twist.twist.linear;
-                wheel_velocity = Zero3d;
-                // 针对项目特化
-                (wdata.y) ? wheel_velocity(1) = wdata.x : wheel_velocity(0) = wdata.x;
-                // wheel_velocity << wdata.x, wdata.y, wdata.z;
-                kf_state.update_iterated_dyn_share_wheel(Eye3d * wheel_cov, wheel_velocity);  // wheel更新
-
-                meas.wheel.pop_front();
-            }
-        }
-
-        /*** update by gnss meas ***/
-        static bool gnss_heading_need_init_ = true;
-
-        if (!meas.gnss.empty()) {
-            while (meas.gnss.size() && get_time_sec(meas.gnss.front()->header.stamp) < get_time_sec(head->header.stamp)) {
-                meas.gnss.pop_front();
-            }
-            // gnss位于两个imu之间
-            if (meas.gnss.size() && get_time_sec(meas.gnss.front()->header.stamp) < get_time_sec(tail->header.stamp)) {
-                gps_pos = meas.gnss.front()->pose;
-                double gps_heading = gps_pos.covariance[0];  // GPS Heading + 90 = 原始车头的Heading -  当前角度 = 应该旋转的角度
-                int status = gps_pos.covariance[4];
-
-                // GNSS init
-                if (gnss_heading_need_init_ && status == 4) {
-                    state_ikfom init_state = kf_state.get_x();  // 初始状态量
-
-                    double rot_yaw = init_state.rot.matrix().eulerAngles(0, 1, 2)(2);
-                    // TODO: dataset: big - 90  add +90
-                    init_state.offset_R_G_I = Sophus::SO3(Eigen::AngleAxisd(DEG2RAD(gps_heading - 90) + rot_yaw, Eigen::Vector3d::UnitZ()).matrix());
-                    kf_state.change_x(init_state);
-
-                    std::cout << "GNSS Initial Done :" << gps_heading + 90 + RAD2DEG(rot_yaw) << std::endl;
-                    gnss_heading_need_init_ = false;
-
-                } else {
-                    // covariance
-                    Eigen::Matrix3d gnss_cov_mat = Eye3d;  // 根据解的状态给值
-
-                    if (status == 4) {  // 固定解 Fixed
-                        gnss_cov_mat(0, 0) = gnss_cov_mat(1, 1) = 0.05;
-                        auto&& position = gps_pos.pose.position;
-                        kf_state.update_iterated_dyn_share_gnss(gnss_cov_mat, V3D(position.x, position.y, position.z));
-                    } else {
-                        std::cout << "status: " << status << std::endl;
-                    }
-                    // TODO:跳变检测
-                }
-
-                meas.gnss.pop_front();
-            }
-        }
 
         imu_state = kf_state.get_x();  // 更新IMU状态为积分后的状态
         // 更新上一帧角速度 = 后一帧角速度-bias
@@ -229,7 +164,7 @@ void ImuProcess::UndistortPcl(MeasureGroup& meas, esekfom::esekf& kf_state, Poin
         acc_s_last = imu_state.rot * (acc_s_last - imu_state.ba) + imu_state.grav;
         // std::cout << "--acc_s_last: " << acc_s_last.transpose() << std::endl<< std::endl;
 
-        double&& offs_t = get_time_sec(tail->header.stamp) - pcl_beg_time;  // 后一个IMU时刻距离此次雷达开始的时间间隔
+        double&& offs_t = tail->header.stamp.toSec() - pcl_beg_time;  // 后一个IMU时刻距离此次雷达开始的时间间隔
         IMUpose.push_back(set_pose6d(offs_t, acc_s_last, angvel_last, imu_state.vel, imu_state.pos, imu_state.rot.matrix()));
     }
 
@@ -278,7 +213,7 @@ void ImuProcess::UndistortPcl(MeasureGroup& meas, esekfom::esekf& kf_state, Poin
     }
 }
 
-void ImuProcess::Process(MeasureGroup& meas, esekfom::esekf& kf_state, PointCloudXYZI::Ptr& cur_pcl_un_) {
+void ImuProcess::Process(MeasureGroup& meas, esekfom::esekf& kf_state, CloudType::Ptr& cur_pcl_un_) {
     if (meas.imu.empty()) return;
 
     assert(meas.lidar != nullptr);
